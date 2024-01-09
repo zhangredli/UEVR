@@ -100,6 +100,17 @@ std::optional<std::string> VR::initialize_openvr() {
     m_openvr = std::make_shared<runtimes::OpenVR>();
     m_openvr->loaded = false;
 
+    const auto wants_openxr = m_requested_runtime_name->value() == "openxr_loader.dll";
+
+    SPDLOG_INFO("[VR] Requested runtime: {}", m_requested_runtime_name->value());
+
+    if (wants_openxr && GetModuleHandleW(L"openxr_loader.dll") != nullptr) {
+        // pre-injected
+        m_openvr->dll_missing = true;
+        m_openvr->error = "OpenXR already loaded";
+        return Mod::on_initialize();
+    }
+
     if (GetModuleHandleW(L"openvr_api.dll") == nullptr) {
         // pre-injected
         if (GetModuleHandleW(L"openxr_loader.dll") != nullptr) {
@@ -635,6 +646,9 @@ bool VR::is_any_action_down() {
         return true;
     }
 
+    const auto left_joystick = get_left_joystick();
+    const auto right_joystick = get_right_joystick();
+
     for (auto& it : m_action_handles) {
         // These are too easy to trigger
         if (it.second == m_action_thumbrest_touch_left || it.second == m_action_thumbrest_touch_right) {
@@ -649,7 +663,7 @@ bool VR::is_any_action_down() {
             continue;
         }
 
-        if (is_action_active(it.second, m_left_joystick) || is_action_active(it.second, m_right_joystick)) {
+        if (is_action_active(it.second, left_joystick) || is_action_active(it.second, right_joystick)) {
             return true;
         }
     }
@@ -747,16 +761,18 @@ void VR::on_xinput_get_state(uint32_t* retval, uint32_t user_index, XINPUT_STATE
         state->Gamepad.sThumbRY = 0;
     }
 
-    const auto joysticks = std::array<vr::VRInputValueHandle_t, 2> {
-        m_right_joystick,
-        m_left_joystick
-    };
+    const auto left_joystick = get_left_joystick();
+    const auto right_joystick = get_right_joystick();
+    const auto wants_swap = m_swap_controllers->value();
 
     runtime->handle_pause_select(is_action_active_any_joystick(m_action_system_button));
     do_pause_select();
 
-    const auto is_right_a_button_down = is_action_active_any_joystick(m_action_a_button_right);
-    const auto is_left_a_button_down = is_action_active_any_joystick(m_action_a_button_left);
+    const auto& a_button_left = !wants_swap ? m_action_a_button_left : m_action_a_button_right;
+    const auto& a_button_right = !wants_swap ? m_action_a_button_right : m_action_a_button_left;
+
+    const auto is_right_a_button_down = is_action_active_any_joystick(a_button_right);
+    const auto is_left_a_button_down = is_action_active_any_joystick(a_button_left);
 
     if (is_right_a_button_down) {
         state->Gamepad.wButtons |= XINPUT_GAMEPAD_A;
@@ -766,8 +782,11 @@ void VR::on_xinput_get_state(uint32_t* retval, uint32_t user_index, XINPUT_STATE
         state->Gamepad.wButtons |= XINPUT_GAMEPAD_B;
     }
 
-    const auto is_right_b_button_down = is_action_active_any_joystick(m_action_b_button_right);
-    const auto is_left_b_button_down = is_action_active_any_joystick(m_action_b_button_left);
+    const auto& b_button_left = !wants_swap ? m_action_b_button_left : m_action_b_button_right;
+    const auto& b_button_right = !wants_swap ? m_action_b_button_right : m_action_b_button_left;
+
+    const auto is_right_b_button_down = is_action_active_any_joystick(b_button_right);
+    const auto is_left_b_button_down = is_action_active_any_joystick(b_button_left);
 
     if (is_right_b_button_down) {
         state->Gamepad.wButtons |= XINPUT_GAMEPAD_X;
@@ -777,8 +796,8 @@ void VR::on_xinput_get_state(uint32_t* retval, uint32_t user_index, XINPUT_STATE
         state->Gamepad.wButtons |= XINPUT_GAMEPAD_Y;
     }
 
-    const auto is_left_joystick_click_down = is_action_active(m_action_joystick_click, m_left_joystick);
-    const auto is_right_joystick_click_down = is_action_active(m_action_joystick_click, m_right_joystick);
+    const auto is_left_joystick_click_down = is_action_active(m_action_joystick_click, left_joystick);
+    const auto is_right_joystick_click_down = is_action_active(m_action_joystick_click, right_joystick);
 
     if (is_left_joystick_click_down) {
         state->Gamepad.wButtons |= XINPUT_GAMEPAD_LEFT_THUMB;
@@ -788,8 +807,8 @@ void VR::on_xinput_get_state(uint32_t* retval, uint32_t user_index, XINPUT_STATE
         state->Gamepad.wButtons |= XINPUT_GAMEPAD_RIGHT_THUMB;
     }
 
-    const auto is_left_trigger_down = is_action_active(m_action_trigger, m_left_joystick);
-    const auto is_right_trigger_down = is_action_active(m_action_trigger, m_right_joystick);
+    const auto is_left_trigger_down = is_action_active(m_action_trigger, left_joystick);
+    const auto is_right_trigger_down = is_action_active(m_action_trigger, right_joystick);
 
     if (is_left_trigger_down) {
         state->Gamepad.bLeftTrigger = 255;
@@ -799,8 +818,8 @@ void VR::on_xinput_get_state(uint32_t* retval, uint32_t user_index, XINPUT_STATE
         state->Gamepad.bRightTrigger = 255;
     }
 
-    const auto is_right_grip_down = is_action_active(m_action_grip, m_right_joystick);
-    const auto is_left_grip_down = is_action_active(m_action_grip, m_left_joystick);
+    const auto is_right_grip_down = is_action_active(m_action_grip, right_joystick);
+    const auto is_left_grip_down = is_action_active(m_action_grip, left_joystick);
 
     if (is_right_grip_down) {
         state->Gamepad.wButtons |= XINPUT_GAMEPAD_RIGHT_SHOULDER;
@@ -834,8 +853,11 @@ void VR::on_xinput_get_state(uint32_t* retval, uint32_t user_index, XINPUT_STATE
         state->Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_LEFT;
     }
 
-    const auto left_joystick_axis = get_joystick_axis(m_left_joystick);
-    const auto right_joystick_axis = get_joystick_axis(m_right_joystick);
+    const auto left_joystick_axis = get_joystick_axis(left_joystick);
+    const auto right_joystick_axis = get_joystick_axis(right_joystick);
+
+    const auto true_left_joystick_axis = get_joystick_axis(m_left_joystick);
+    const auto true_right_joystick_axis = get_joystick_axis(m_right_joystick);
 
     state->Gamepad.sThumbLX = (int16_t)std::clamp<float>(((float)state->Gamepad.sThumbLX + left_joystick_axis.x * 32767.0f), -32767.0f, 32767.0f);
     state->Gamepad.sThumbLY = (int16_t)std::clamp<float>(((float)state->Gamepad.sThumbLY + left_joystick_axis.y * 32767.0f), -32767.0f, 32767.0f);
@@ -861,41 +883,57 @@ void VR::on_xinput_get_state(uint32_t* retval, uint32_t user_index, XINPUT_STATE
         const auto dpad_active = (button_touch_inactive && thumbrest_check) || dpad_method == DPadMethod::LEFT_JOYSTICK || dpad_method == DPadMethod::RIGHT_JOYSTICK;
 
         if (dpad_active) {
-            SHORT ThumbY{0};
-            SHORT ThumbX{0};
+            float ty{0.0f};
+            float tx{0.0f};
+            //SHORT ThumbY{0};
+            //SHORT ThumbX{0};
             // If someone is accidentally touching both thumbrests while also moving a joystick, this will default to left joystick.
             if (dpad_method == DPadMethod::RIGHT_TOUCH || dpad_method == DPadMethod::LEFT_JOYSTICK) {
-                ThumbY = state->Gamepad.sThumbLY;
-                ThumbX = state->Gamepad.sThumbLX;
+                //ThumbY = state->Gamepad.sThumbLY;
+                //ThumbX = state->Gamepad.sThumbLX;
+                ty = true_left_joystick_axis.y;
+                tx = true_left_joystick_axis.x;
             }
             else if (dpad_method == DPadMethod::LEFT_TOUCH || dpad_method == DPadMethod::RIGHT_JOYSTICK) {
-                ThumbY = state->Gamepad.sThumbRY;
-                ThumbX = state->Gamepad.sThumbRX;
+                //ThumbY = state->Gamepad.sThumbRY;
+                //ThumbX = state->Gamepad.sThumbRX;
+                ty = true_right_joystick_axis.y;
+                tx = true_right_joystick_axis.x;
             }
             
-            if (ThumbY >= 16383) {
+            if (ty >= 0.5f) {
                 state->Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_UP;
             }
 
-            if (ThumbY <= -16383) {
+            if (ty <= -0.5f) {
                 state->Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_DOWN;
             }
 
-            if (ThumbX >= 16383) {
+            if (tx >= 0.5f) {
                 state->Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_RIGHT;
             }
 
-            if (ThumbX <= -16383) {
+            if (tx <= -0.5f) {
                 state->Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_LEFT;
             }
 
             if (dpad_method == DPadMethod::RIGHT_TOUCH || dpad_method == DPadMethod::LEFT_JOYSTICK) {
-                state->Gamepad.sThumbLY = 0;
-                state->Gamepad.sThumbLX = 0;
+                if (!wants_swap) {
+                    state->Gamepad.sThumbLY = 0;
+                    state->Gamepad.sThumbLX = 0;
+                } else {
+                    state->Gamepad.sThumbRY = 0;
+                    state->Gamepad.sThumbRX = 0;
+                }
             }
             else if (dpad_method == DPadMethod::LEFT_TOUCH || dpad_method == DPadMethod::RIGHT_JOYSTICK) {
-                state->Gamepad.sThumbRY = 0;
-                state->Gamepad.sThumbRX = 0;
+                if (!wants_swap) {
+                    state->Gamepad.sThumbRY = 0;
+                    state->Gamepad.sThumbRX = 0;
+                } else {
+                    state->Gamepad.sThumbLY = 0;
+                    state->Gamepad.sThumbLX = 0;
+                }
             }
         }
     }
@@ -905,10 +943,10 @@ void VR::on_xinput_get_state(uint32_t* retval, uint32_t user_index, XINPUT_STATE
         DPadMethod dpad_method = get_dpad_method();
         const auto snapturn_deadzone = get_snapturn_js_deadzone();
         float stick_axis{};
-            
+
         if (!m_was_snapturn_run_on_input) {
             if (dpad_method == RIGHT_JOYSTICK) {
-                stick_axis = get_left_stick_axis().x;
+                stick_axis = true_left_joystick_axis.x;
                 if (glm::abs(stick_axis) >= snapturn_deadzone) {
                     if (stick_axis < 0) {
                         m_snapturn_left = true;
@@ -918,8 +956,9 @@ void VR::on_xinput_get_state(uint32_t* retval, uint32_t user_index, XINPUT_STATE
                 }
             }
             else {
-                stick_axis = get_right_stick_axis().x;
-                if (glm::abs(stick_axis) >= snapturn_deadzone && !(dpad_method == DPadMethod::LEFT_TOUCH && is_action_active_any_joystick(m_action_thumbrest_touch_left))) {
+                stick_axis = right_joystick_axis.x;
+                const auto& thumbrest_touch_left = !wants_swap ? m_action_thumbrest_touch_left : m_action_thumbrest_touch_right;
+                if (glm::abs(stick_axis) >= snapturn_deadzone && !(dpad_method == DPadMethod::LEFT_TOUCH && is_action_active_any_joystick(thumbrest_touch_left))) {
                     if (stick_axis < 0) {
                         m_snapturn_left = true;
                     }
@@ -930,7 +969,7 @@ void VR::on_xinput_get_state(uint32_t* retval, uint32_t user_index, XINPUT_STATE
         }
         else {
             if (dpad_method == RIGHT_JOYSTICK) {
-                if (glm::abs(get_left_stick_axis().x) < snapturn_deadzone) {
+                if (glm::abs(true_left_joystick_axis.x) < snapturn_deadzone) {
                     m_was_snapturn_run_on_input = false;
                 } else {
                     state->Gamepad.sThumbLY = 0;
@@ -938,7 +977,7 @@ void VR::on_xinput_get_state(uint32_t* retval, uint32_t user_index, XINPUT_STATE
                 }
             }
             else {
-                if (glm::abs(get_right_stick_axis().x) < snapturn_deadzone) {
+                if (glm::abs(right_joystick_axis.x) < snapturn_deadzone) {
                     m_was_snapturn_run_on_input = false;
                 } else {
                     state->Gamepad.sThumbRY = 0;
@@ -967,11 +1006,11 @@ void VR::on_xinput_set_state(uint32_t* retval, uint32_t user_index, XINPUT_VIBRA
     const auto right_amplitude = ((float)vibration->wRightMotorSpeed / 65535.0f) * 5.0f;
 
     if (left_amplitude > 0.0f) {
-        trigger_haptic_vibration(0.0f, 0.1f, 1.0f, left_amplitude, m_left_joystick);
+        trigger_haptic_vibration(0.0f, 0.1f, 1.0f, left_amplitude, get_left_joystick());
     }
 
     if (right_amplitude > 0.0f) {
-        trigger_haptic_vibration(0.0f, 0.1f, 1.0f, right_amplitude, m_right_joystick);
+        trigger_haptic_vibration(0.0f, 0.1f, 1.0f, right_amplitude, get_right_joystick());
     }
 }
 
@@ -1290,6 +1329,65 @@ void VR::on_pre_engine_tick(sdk::UGameEngine* engine, float delta) {
     }
 }
 
+void VR::on_pre_calculate_stereo_view_offset(void* stereo_device, const int32_t view_index, Rotator<float>* view_rotation, 
+                                             const float world_to_meters, Vector3f* view_location, bool is_double)
+{
+    if (!is_hmd_active()) {
+        m_camera_freeze.position_wants_freeze = false;
+        m_camera_freeze.rotation_wants_freeze = false;
+        return;
+    }
+
+    Rotator<double>* view_rotation_double = (Rotator<double>*)view_rotation;
+    Vector3d* view_location_double = (Vector3d*)view_location;
+
+    if (m_camera_freeze.position_wants_freeze) {
+        if (is_double) {
+            m_camera_freeze.position = glm::vec3{ (float)view_location_double->x, (float)view_location_double->y, (float)view_location_double->z };
+        } else {
+            m_camera_freeze.position = glm::vec3{ view_location->x, view_location->y, view_location->z };
+        }
+
+        m_camera_freeze.position_wants_freeze = false;
+        m_camera_freeze.position_frozen = true;
+    }
+
+    if (m_camera_freeze.rotation_wants_freeze) {
+        if (is_double) {
+            m_camera_freeze.rotation = glm::vec3{ (float)view_rotation_double->pitch, (float)view_rotation_double->yaw, (float)view_rotation_double->roll };
+        } else {
+            m_camera_freeze.rotation = glm::vec3{ view_rotation->pitch, view_rotation->yaw, view_rotation->roll };
+        }
+
+        m_camera_freeze.rotation_wants_freeze = false;
+        m_camera_freeze.rotation_frozen = true;
+    }
+
+    if (m_camera_freeze.position_frozen) {
+        if (is_double) {
+            view_location_double->x = m_camera_freeze.position.x;
+            view_location_double->y = m_camera_freeze.position.y;
+            view_location_double->z = m_camera_freeze.position.z;
+        } else {
+            view_location->x = m_camera_freeze.position.x;
+            view_location->y = m_camera_freeze.position.y;
+            view_location->z = m_camera_freeze.position.z;
+        }
+    }
+
+    if (m_camera_freeze.rotation_frozen) {
+        if (is_double) {
+            view_rotation_double->pitch = m_camera_freeze.rotation.x;
+            view_rotation_double->yaw = m_camera_freeze.rotation.y;
+            view_rotation_double->roll = m_camera_freeze.rotation.z;
+        } else {
+            view_rotation->pitch = m_camera_freeze.rotation.x;
+            view_rotation->yaw = m_camera_freeze.rotation.y;
+            view_rotation->roll = m_camera_freeze.rotation.z;
+        }
+    }
+}
+
 void VR::on_pre_viewport_client_draw(void* viewport_client, void* viewport, void* canvas){
     ZoneScopedN(__FUNCTION__);
 
@@ -1321,8 +1419,11 @@ void VR::update_hmd_state(bool from_view_extensions, uint32_t frame_count) {
     }
 
     if (!is_using_afr()) {
-        // Forcefully disable r.HZBOcclusion, it doesn't work with native stereo mode
-        if (m_disable_hzbocclusion->value()) {
+        const auto is_hzbo_frozen_by_cvm = m_cvar_manager != nullptr && m_cvar_manager->is_hzbo_frozen_and_enabled();
+
+        // Forcefully disable r.HZBOcclusion, it doesn't work with native stereo mode (sometimes)
+        // Except when the user sets it to 1 with the CVar Manager, we need to respect that
+        if (m_disable_hzbocclusion->value() && !is_hzbo_frozen_by_cvm) {
             const auto r_hzb_occlusion_value = sdk::get_cvar_int(L"Renderer", L"r.HZBOcclusion");
 
             // Only set it once, otherwise we'll be spamming a Set call every frame
@@ -1464,17 +1565,17 @@ void VR::on_config_load(const utility::Config& cfg, bool set_defaults) {
         option.config_load(cfg, set_defaults);
     }
 
-    if (get_runtime()->loaded) {
+    if (get_runtime() != nullptr && get_runtime()->loaded) {
         get_runtime()->on_config_load(cfg, set_defaults);
-    }
 
-    // Run the rest of OpenXR initialization code here that depends on config values
-    if (m_first_config_load) {
-        m_first_config_load = false; // because the frontend can request config reloads
+        // Run the rest of OpenXR initialization code here that depends on config values
+        if (m_first_config_load) {
+            m_first_config_load = false; // because the frontend can request config reloads
 
-         if (get_runtime()->is_openxr() && get_runtime()->loaded) {
-            spdlog::info("[VR] Finishing up OpenXR initialization");
-            initialize_openxr_swapchains();
+            if (get_runtime()->is_openxr()) {
+                spdlog::info("[VR] Finishing up OpenXR initialization");
+                initialize_openxr_swapchains();
+            }
         }
     }
 
@@ -1483,7 +1584,10 @@ void VR::on_config_load(const utility::Config& cfg, bool set_defaults) {
     }
 
     m_overlay_component.on_config_load(cfg, set_defaults);
-    m_cvar_manager->on_config_load(cfg, set_defaults);
+
+    if (m_cvar_manager != nullptr) {
+        m_cvar_manager->on_config_load(cfg, set_defaults);   
+    }
 
     // Load camera offsets
     load_cameras();
@@ -1659,6 +1763,11 @@ void VR::handle_keybinds() {
 
     if (m_keybind_disable_vr->is_key_down_once()) {
         m_disable_vr = !m_disable_vr; // definitely should not be persistent
+    }
+
+    // The Slate UI
+    if (m_keybind_toggle_gui->is_key_down_once()) {
+        m_enable_gui->toggle();
     }
 }
 
@@ -2139,6 +2248,8 @@ void VR::on_draw_sidebar_entry(std::string_view name) {
         if (ImGui::TreeNode(_L("Controller"))) {
             m_joystick_deadzone->draw("VR Joystick Deadzone");
             m_dpad_shifting->draw("DPad Shifting");
+            ImGui::SameLine();
+            m_swap_controllers->draw("Left-handed Controller Inputs");
             m_dpad_shifting_method->draw("DPad Shifting Method");
 
             ImGui::TreePop();
@@ -2146,7 +2257,6 @@ void VR::on_draw_sidebar_entry(std::string_view name) {
 
         ImGui::SetNextItemOpen(true, ImGuiCond_::ImGuiCond_Once);
         if (ImGui::TreeNode(_L("Aim Method"))) {
-            ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), _L("Experimental, may crash"));
             ImGui::TextWrapped(_L("Some games may not work with this enabled."));
             if (m_aim_method->draw("Type")) {
                 m_previous_aim_method = (AimMethod)m_aim_method->value();
@@ -2214,6 +2324,25 @@ void VR::on_draw_sidebar_entry(std::string_view name) {
                 }
             }
 
+            bool pos_freeze = m_camera_freeze.position_frozen || m_camera_freeze.position_wants_freeze;
+            if (ImGui::Checkbox("Freeze Position", &pos_freeze)) {
+                if (pos_freeze) {
+                    m_camera_freeze.position_wants_freeze = true;
+                } else {
+                    m_camera_freeze.position_frozen = false;
+                }
+            }
+
+            ImGui::SameLine();
+            bool rot_freeze = m_camera_freeze.rotation_frozen || m_camera_freeze.rotation_wants_freeze;
+            if (ImGui::Checkbox("Freeze Rotation", &rot_freeze)) {
+                if (rot_freeze) {
+                    m_camera_freeze.rotation_wants_freeze = true;
+                } else {
+                    m_camera_freeze.rotation_frozen = false;
+                }
+            }
+
             ImGui::TreePop();
         }
 
@@ -2247,6 +2376,7 @@ void VR::on_draw_sidebar_entry(std::string_view name) {
         ImGui::SetNextItemOpen(true, ImGuiCond_::ImGuiCond_Once);
         if (ImGui::TreeNode(_L("Overlay/Runtime Keys"))) {
             m_keybind_toggle_2d_screen->draw("Toggle 2D Screen Mode Key");
+            m_keybind_toggle_gui->draw("Toggle In-Game UI Key");
             m_keybind_disable_vr->draw("Disable VR Key");
 
             ImGui::TreePop();
@@ -2764,6 +2894,7 @@ Vector2f VR::get_joystick_axis(vr::VRInputValueHandle_t handle) const {
 
         return out;
     } else if (get_runtime()->is_openxr()) {
+        // Not using get_left/right_joystick here because it flips the controllers
         if (handle == m_left_joystick) {
             auto out = m_openxr->get_left_stick_axis();
             //return glm::length(out) > m_joystick_deadzone->value() ? out : Vector2f{};
@@ -2797,11 +2928,11 @@ Vector2f VR::get_joystick_axis(vr::VRInputValueHandle_t handle) const {
 }
 
 Vector2f VR::get_left_stick_axis() const {
-    return get_joystick_axis(m_left_joystick);
+    return get_joystick_axis(get_left_joystick());
 }
 
 Vector2f VR::get_right_stick_axis() const {
-    return get_joystick_axis(m_right_joystick);
+    return get_joystick_axis(get_right_joystick());
 }
 
 void VR::trigger_haptic_vibration(float seconds_from_now, float duration, float frequency, float amplitude, vr::VRInputValueHandle_t source) {

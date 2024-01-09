@@ -53,15 +53,27 @@ public:
             return;
         }
 
-        auto v = cfg.get<T>(m_config_name);
+        if constexpr (std::is_same_v<T, std::string>) {
+            auto v = cfg.get(m_config_name);
 
-        if (v) {
-            m_value = *v;
+            if (v) {
+                m_value = *v;
+            }
+        } else {
+            auto v = cfg.get<T>(m_config_name);
+
+            if (v) {
+                m_value = *v;
+            }
         }
     };
 
     virtual void config_save(utility::Config& cfg) override {
-        cfg.set<T>(m_config_name, m_value);
+        if constexpr (std::is_same_v<T, std::string>) {
+            cfg.set(m_config_name, m_value);
+        } else {
+            cfg.set<T>(m_config_name, m_value);
+        }
     };
 
     operator T&() {
@@ -86,6 +98,20 @@ public:
 
     bool should_draw_option() const {
         return g_framework->is_advanced_view_enabled() || !this->m_advanced_option;
+    }
+    
+
+    void context_menu_logic() {
+        if (ImGui::BeginPopupContextItem()) {
+            reset_to_default_value_logic();
+            ImGui::EndPopup();
+        }
+    }
+
+    void reset_to_default_value_logic() {
+        if (ImGui::Button("Reset to default")) {
+            m_value = m_default_value;
+        }
     }
 
 protected:
@@ -115,6 +141,7 @@ public:
         
         ImGui::PushID(this);
         auto ret = ImGui::Checkbox(_L(name.data()), &m_value);
+        context_menu_logic();
         ImGui::PopID();
 
         return ret;
@@ -151,6 +178,7 @@ public:
 
         ImGui::PushID(this);
         auto ret = ImGui::InputFloat(_L(name.data()), &m_value);
+        context_menu_logic();
         ImGui::PopID();
 
         return ret;
@@ -187,6 +215,8 @@ public:
 
         ImGui::PushID(this);
         auto ret = ImGui::SliderFloat(_L(name.data()), &m_value, m_range.x, m_range.y);
+        context_menu_logic();
+        
         ImGui::PopID();
 
         return ret;
@@ -227,7 +257,9 @@ public:
         }
 
         ImGui::PushID(this);
+
         auto ret = ImGui::InputInt(_L(name.data()), &m_value);
+        context_menu_logic();
         ImGui::PopID();
 
         return ret;
@@ -263,6 +295,7 @@ public:
 
         ImGui::PushID(this);
         auto ret = ImGui::SliderInt(_L(name.data()), &m_value, m_int_range.min, m_int_range.max);
+        context_menu_logic();
         ImGui::PopID();
 
         return ret;
@@ -310,6 +343,7 @@ public:
 
         ImGui::PushID(this);
         auto ret = ImGui::Combo(_L(name.data()), &m_value, m_options.data(), static_cast<int32_t>(m_options.size()));
+        context_menu_logic();
         ImGui::PopID();
 
         return ret;
@@ -374,6 +408,7 @@ public:
 
         ImGui::PushID(this);
         ImGui::Button(_L(name.data()));
+        context_menu_logic();
 
         if (ImGui::IsItemHovered() && ImGui::GetIO().MouseDown[0]) {
             m_waiting_for_new_key = true;
@@ -461,6 +496,52 @@ public:
 protected:
     bool m_was_key_down{ false };
     bool m_waiting_for_new_key{ false };
+};
+
+class ModString : public ModValue<std::string> {
+public:
+    using Ptr = std::unique_ptr<ModString>;
+
+    static auto create(std::string_view config_name, std::string default_value = "", bool advanced_option = false) {
+        return std::make_unique<ModString>(config_name, default_value, advanced_option);
+    }
+
+    ModString(std::string_view config_name, std::string default_value = "", bool advanced_option = false)
+        : ModValue{ config_name, default_value, advanced_option }
+    {
+    }
+
+    // No use for actually displaying this yet, so leaving them out for now
+    bool draw(std::string_view name) override {
+        if (!should_draw_option()) {
+            return false;
+        }
+
+        // TODO
+
+        return false;
+    }
+
+    void draw_value(std::string_view name) override {
+        if (!should_draw_option()) {
+            return;
+        }
+
+        ImGui::Text("%s: %s", name.data(), m_value.c_str());
+    }
+
+    void config_load(const utility::Config& cfg, bool set_defaults) override {
+        if (set_defaults) {
+            m_value = m_default_value;
+            return;
+        }
+
+        auto v = cfg.get(m_config_name);
+
+        if (v) {
+            m_value = *v;
+        }
+    };
 };
 
 class Mod {

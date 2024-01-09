@@ -115,8 +115,11 @@ void OverlayComponent::update_input_mouse_emulation() {
             };
 
             static bool was_pressing = false;
+            static bool was_pressing_right = false;
 
-            if (VR::get()->is_action_active_any_joystick(vr->get_action_handle(VR::s_action_a_button_right))) {
+            // Left click.
+            const auto& a_button_right = !vr->m_swap_controllers->value() ? VR::s_action_a_button_right : VR::s_action_a_button_left;
+            if (VR::get()->is_action_active_any_joystick(vr->get_action_handle(a_button_right))) {
                 // Clear any gamepad A events.
                 auto ctx = io.Ctx;
 
@@ -136,6 +139,30 @@ void OverlayComponent::update_input_mouse_emulation() {
             } else if (was_pressing) {
                 io.AddMouseButtonEvent(0, false);
                 was_pressing = false;
+            }
+
+            // Right click.
+            const auto& b_button_right = !vr->m_swap_controllers->value() ? VR::s_action_b_button_right : VR::s_action_b_button_left;
+            if (VR::get()->is_action_active_any_joystick(vr->get_action_handle(b_button_right))) {
+                // Clear any gamepad B events.
+                auto ctx = io.Ctx;
+
+                if (ctx != nullptr) {
+                    for (auto i = 0; i < ctx->InputEventsQueue.size(); ++i) {
+                        auto& event = ctx->InputEventsQueue[i];
+
+                        if (event.Type == ImGuiInputEventType::ImGuiInputEventType_Key && event.Key.Key == ImGuiKey_GamepadFaceLeft) {
+                            ctx->InputEventsQueue.erase(ctx->InputEventsQueue.begin() + i);
+                            --i;
+                        }
+                    }
+                }
+
+                io.AddMouseButtonEvent(1, true);
+                was_pressing_right = true;
+            } else if (was_pressing_right) {
+                io.AddMouseButtonEvent(1, false);
+                was_pressing_right = false;
             }
 
             const auto right_stick_axis = vr->get_right_stick_axis();
@@ -708,8 +735,9 @@ void OverlayComponent::update_overlay_openvr() {
         // Check if the controller pointer intersects with the quad, and we can use this to emulate the mouse
         if (vr->is_using_controllers()) {
             // Right only for now for testing
-            const auto right_controller_rot = glm::quat{vr->get_rotation(vr->get_right_controller_index(), false)};
-            const auto right_controller_pos = glm::vec3{vr->get_position(vr->get_right_controller_index(), false)};
+            const auto controller_index = !vr->m_swap_controllers->value() ? vr->get_right_controller_index() : vr->get_left_controller_index();
+            const auto right_controller_rot = glm::quat{vr->get_rotation(controller_index, false)};
+            const auto right_controller_pos = glm::vec3{vr->get_position(controller_index, false)};
 
             const auto start = right_controller_pos;
             auto fwd = (right_controller_rot * glm::vec3{0.0f, 0.0f, -1.0f});
@@ -827,8 +855,9 @@ std::optional<std::reference_wrapper<XrCompositionLayerQuad>> OverlayComponent::
     // Check if the controller pointer intersects with the quad, and we can use this to emulate the mouse
     if (vr->is_using_controllers()) {
         // Right only for now for testing
-        const auto right_controller_rot = glm::quat{vr->get_rotation(vr->get_right_controller_index(), false)};
-        const auto right_controller_pos = glm::vec3{vr->get_position(vr->get_right_controller_index(), false)};
+        const auto controller_index = !vr->m_swap_controllers->value() ? vr->get_right_controller_index() : vr->get_left_controller_index();
+        const auto right_controller_rot = glm::quat{vr->get_rotation(controller_index, false)};
+        const auto right_controller_pos = glm::vec3{vr->get_position(controller_index, false)};
 
         const auto start = right_controller_pos;
         auto fwd = (right_controller_rot * glm::vec3{0.0f, 0.0f, -1.0f});
@@ -1042,8 +1071,9 @@ std::optional<std::reference_wrapper<XrCompositionLayerQuad>> OverlayComponent::
     // Check if the controller pointer intersects with the quad, and we can use this to emulate the mouse
     if (vr->is_using_controllers()) {
         // Right only for now for testing
-        const auto right_controller_rot = glm::quat{vr->get_rotation(vr->get_right_controller_index(), false)};
-        const auto right_controller_pos = glm::vec3{vr->get_position(vr->get_right_controller_index(), false)};
+        const auto controller_index = !vr->m_swap_controllers->value() ? vr->get_right_controller_index() : vr->get_left_controller_index();
+        const auto right_controller_rot = glm::quat{vr->get_rotation(controller_index, false)};
+        const auto right_controller_pos = glm::vec3{vr->get_position(controller_index, false)};
 
         const auto start = right_controller_pos;
         auto fwd = (right_controller_rot * glm::vec3{0.0f, 0.0f, -1.0f});

@@ -133,6 +133,8 @@ public:
     void update_imgui_state_from_xinput_state(XINPUT_STATE& state, bool is_vr_controller);
 
     void on_pre_engine_tick(sdk::UGameEngine* engine, float delta) override;
+    void on_pre_calculate_stereo_view_offset(void* stereo_device, const int32_t view_index, Rotator<float>* view_rotation, 
+                                             const float world_to_meters, Vector3f* view_location, bool is_double) override;
     void on_pre_viewport_client_draw(void* viewport_client, void* viewport, void* canvas) override;
 
     void update_hmd_state(bool from_view_extensions = false, uint32_t frame_count = 0);
@@ -308,11 +310,19 @@ public:
     }
 
     auto get_left_joystick() const {
-        return m_left_joystick;
+        if (!m_swap_controllers->value()) {
+            return m_left_joystick;
+        }
+
+        return m_right_joystick;
     }
 
     auto get_right_joystick() const {
-        return m_right_joystick;
+        if (!m_swap_controllers->value()) {
+            return m_right_joystick;
+        }
+
+        return m_left_joystick;
     }
 
     bool is_gui_enabled() const {
@@ -763,6 +773,7 @@ private:
     const ModToggle::Ptr m_load_blueprint_code{ ModToggle::create(generate_name("LoadBlueprintCode"), false, true) };
     const ModToggle::Ptr m_2d_screen_mode{ ModToggle::create(generate_name("2DScreenMode"), false) };
     const ModToggle::Ptr m_roomscale_movement{ ModToggle::create(generate_name("RoomscaleMovement"), false) };
+    const ModToggle::Ptr m_swap_controllers{ ModToggle::create(generate_name("SwapControllerInputs"), false) };
 
     // Snap turn settings and globals
     void process_snapturn();
@@ -822,10 +833,24 @@ private:
     const ModKey::Ptr m_keybind_disable_vr{ ModKey::create(generate_name("DisableVRKey")) };
     bool m_disable_vr{false}; // definitely should not be persistent
 
+    const ModKey::Ptr m_keybind_toggle_gui{ ModKey::create(generate_name("ToggleSlateGUIKey")) };
+    
+    const ModString::Ptr m_requested_runtime_name{ ModString::create("Frontend_RequestedRuntime", "unset") };
+
     struct DecoupledPitchData {
         mutable std::shared_mutex mtx{};
         glm::quat pre_flattened_rotation{};
     } m_decoupled_pitch_data{};
+
+    struct CameraFreeze {
+        glm::vec3 position{};
+        glm::vec3 rotation{}; // euler
+        bool position_frozen{false};
+        bool rotation_frozen{false};
+
+        bool position_wants_freeze{false};
+        bool rotation_wants_freeze{false};
+    } m_camera_freeze{};
 
     struct CameraData {
         glm::vec3 offset{};
@@ -860,6 +885,7 @@ private:
         *m_load_blueprint_code,
         *m_2d_screen_mode,
         *m_roomscale_movement,
+        *m_swap_controllers,
         *m_snapturn,
         *m_snapturn_joystick_deadzone,
         *m_snapturn_angle,
@@ -894,6 +920,8 @@ private:
         *m_keybind_load_camera_2,
         *m_keybind_toggle_2d_screen,
         *m_keybind_disable_vr,
+        *m_keybind_toggle_gui,
+        *m_requested_runtime_name,
     };
     
 

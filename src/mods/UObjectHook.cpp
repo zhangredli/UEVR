@@ -288,6 +288,10 @@ void UObjectHook::on_pre_calculate_stereo_view_offset(void* stereo_device, const
         return;
     }
 
+    if (m_uobject_hook_disabled) {
+        return;
+    }
+
     auto view_d = (Vector3d*)view_location;
     auto rot_d = (Rotator<double>*)view_rotation;
 
@@ -351,6 +355,10 @@ void UObjectHook::on_post_calculate_stereo_view_offset(void* stereo_device, cons
         return;
     }
 
+    if (m_uobject_hook_disabled) {
+        return;
+    }
+
     std::shared_lock _{m_mutex};
     bool any_adjusting = false;
     for (auto& it : m_motion_controller_attached_components) {
@@ -364,6 +372,10 @@ void UObjectHook::on_post_calculate_stereo_view_offset(void* stereo_device, cons
 }
 
 void UObjectHook::tick_attachments(Rotator<float>* view_rotation, const float world_to_meters, Vector3f* view_location, bool is_double) {
+    if (m_uobject_hook_disabled) {
+        return;
+    }
+
     auto& vr = VR::get();
     auto view_d = (Vector3d*)view_location;
     auto rot_d = (Rotator<double>*)view_rotation;
@@ -1192,6 +1204,15 @@ std::shared_ptr<UObjectHook::PersistentCameraState> UObjectHook::deserialize_cam
 }
 
 void UObjectHook::update_persistent_states() {
+    if (m_uobject_hook_disabled && m_fixed_visibilities) {
+        return;
+    }
+
+    // For when we disable UObjectHook
+    utility::ScopeGuard ___{[this]() {
+        m_fixed_visibilities = true;
+    }};
+
     // Camera state
     if (m_persistent_camera_state != nullptr) {
         auto obj = m_persistent_camera_state->path.resolve();
@@ -1218,7 +1239,7 @@ void UObjectHook::update_persistent_states() {
             static const auto scene_component_t = sdk::USceneComponent::static_class();
 
             // TODO? will need some reworking to support properties from arbitrary objects
-            if (!obj->get_class()->is_a(scene_component_t)) {
+            if (!obj.definition->is_a(scene_component_t)) {
                 continue;
             }
 
@@ -1229,7 +1250,7 @@ void UObjectHook::update_persistent_states() {
                 remove_motion_controller_state(state->last_object);
             }
 
-            auto mc_state = get_or_add_motion_controller_state((sdk::USceneComponent*)obj);
+            auto mc_state = get_or_add_motion_controller_state(obj.as<sdk::USceneComponent*>());
 
             if (mc_state == nullptr) {
                 continue;
@@ -1241,7 +1262,7 @@ void UObjectHook::update_persistent_states() {
                 *mc_state = state->state;
             }
 
-            state->last_object = (sdk::USceneComponent*)obj;
+            state->last_object = obj.as<sdk::USceneComponent*>();
         }
     }
 
@@ -1259,12 +1280,16 @@ void UObjectHook::update_persistent_states() {
                 continue;
             }
 
-            if (prop_base->hide && obj->is_a(scene_comp_t)) {
-                ((sdk::USceneComponent*)obj)->set_visibility(false, false);
+            if (prop_base->hide && obj.definition->is_a(scene_comp_t)) {
+                if (m_uobject_hook_disabled) {
+                    obj.as<sdk::USceneComponent*>()->set_visibility(true, false);
+                } else {
+                    obj.as<sdk::USceneComponent*>()->set_visibility(false, false);
+                }
             }
 
             for (const auto& prop_state : prop_base->properties) {
-                const auto prop_desc = obj->get_class()->find_property(prop_state->name);
+                const auto prop_desc = obj.definition->find_property(prop_state->name);
             
                 if (prop_desc == nullptr) {
                     continue;
@@ -1281,19 +1306,20 @@ void UObjectHook::update_persistent_states() {
                 switch (utility::hash(utility::narrow(prop_t_name))) {
                 case "FloatProperty"_fnv:
                     {
-                        auto& value = *(float*)((uintptr_t)obj + ((sdk::FProperty*)prop_desc)->get_offset());
+                        auto& value = *(float*)(obj.as<uintptr_t>() + ((sdk::FProperty*)prop_desc)->get_offset());
                         value = prop_state->data.f;
                     }
                     break;
                 case "DoubleProperty"_fnv:
                     {
-                        auto& value = *(double*)((uintptr_t)obj + ((sdk::FProperty*)prop_desc)->get_offset());
+                        auto& value = *(double*)(obj.as<uintptr_t>() + ((sdk::FProperty*)prop_desc)->get_offset());
                         value = prop_state->data.d;
                     }
                     break;
+                case "UInt32Property"_fnv:
                 case "IntProperty"_fnv:
                     {
-                        auto& value = *(int32_t*)((uintptr_t)obj + ((sdk::FProperty*)prop_desc)->get_offset());
+                        auto& value = *(int32_t*)(obj.as<uintptr_t>() + ((sdk::FProperty*)prop_desc)->get_offset());
                         value = prop_state->data.i;
                     }
                     break;
@@ -1437,27 +1463,36 @@ sdk::UObject* UObjectHook::StatePath::resolve_base_object() const {
     return nullptr;
 }
 
-sdk::UObject* UObjectHook::StatePath::resolve() const {
+UObjectHook::ResolvedObject UObjectHook::StatePath::resolve() const {
     const auto base = resolve_base_object();
 
     if (base == nullptr) {
         return nullptr;
     }
 
-    auto previous_object = base;
+    void* previous_data = base;
+    sdk::UStruct* previous_data_desc = base->get_class();
+
+    if (previous_data_desc == nullptr) {
+        return nullptr;
+    }
 
     for (auto it = m_path.begin() + 1; it != m_path.end(); ++it) {
+        if (previous_data == nullptr || previous_data_desc == nullptr) {
+            return nullptr;
+        }
+
         switch (utility::hash(*it)) {
         case "Components"_fnv:
         {
             // Make sure the base is an AActor
             static const auto actor_t = sdk::AActor::static_class();
 
-            if (!previous_object->get_class()->is_a(actor_t)) {
+            if (!previous_data_desc->is_a(actor_t)) {
                 return nullptr;
             }
 
-            const auto components = ((sdk::AActor*)previous_object)->get_all_components();
+            const auto components = ((sdk::AActor*)previous_data)->get_all_components();
 
             if (components.empty()) {
                 return nullptr;
@@ -1473,7 +1508,8 @@ sdk::UObject* UObjectHook::StatePath::resolve() const {
                 const auto comp_name = comp->get_class()->get_fname().to_string() + L" " + comp->get_fname().to_string();
 
                 if (utility::narrow(comp_name) == *next_it) {
-                    previous_object = comp;
+                    previous_data = comp;
+                    previous_data_desc = comp->get_class();
                     ++it;
                     break;
                 }
@@ -1490,7 +1526,7 @@ sdk::UObject* UObjectHook::StatePath::resolve() const {
             }
 
             const auto prop_name = *next_it;
-            const auto prop_desc = previous_object->get_class()->find_property(utility::widen(prop_name));
+            const auto prop_desc = previous_data_desc->find_property(utility::widen(prop_name));
 
             if (prop_desc == nullptr) {
                 return nullptr;
@@ -1506,14 +1542,30 @@ sdk::UObject* UObjectHook::StatePath::resolve() const {
             switch (utility::hash(utility::narrow(prop_t_name))) {
             case "ObjectProperty"_fnv:
             {
-                const auto obj_ptr = prop_desc->get_data<sdk::UObject*>(previous_object);
+                const auto obj_ptr = prop_desc->get_data<sdk::UObject*>(previous_data);
                 const auto obj = obj_ptr != nullptr ? *obj_ptr : nullptr;
 
                 if (obj == nullptr) {
                     return nullptr;
                 }
 
-                previous_object = obj;
+                previous_data = obj;
+                previous_data_desc = obj->get_class();
+                ++it;
+                break;
+            }
+            case "StructProperty"_fnv:
+            {
+                const auto struct_data = prop_desc->get_data<void*>(previous_data);
+
+                previous_data = struct_data;
+                previous_data_desc = ((sdk::FStructProperty*)prop_desc)->get_struct();
+
+                if (previous_data_desc == nullptr || previous_data == nullptr) {
+                    return nullptr;
+                }
+
+                // ++it because we are examining the properties
                 ++it;
                 break;
             }
@@ -1538,7 +1590,7 @@ sdk::UObject* UObjectHook::StatePath::resolve() const {
                     return nullptr;
                 }
 
-                const auto array_ptr = prop_desc->get_data<sdk::TArray<sdk::UObject*>>(previous_object);
+                const auto array_ptr = prop_desc->get_data<sdk::TArray<sdk::UObject*>>(previous_data);
 
                 if (array_ptr == nullptr) {
                     return nullptr;
@@ -1568,7 +1620,8 @@ sdk::UObject* UObjectHook::StatePath::resolve() const {
 
                     if (utility::narrow(obj_name) == *prop_it) {
                         found = true;
-                        previous_object = obj;
+                        previous_data = obj;
+                        previous_data_desc = obj->get_class();
                         ++it;
                         ++it;
                         break;
@@ -1581,7 +1634,6 @@ sdk::UObject* UObjectHook::StatePath::resolve() const {
                 break;
             }
 
-            // Need to handle StructProperty but whatever.
             default:
                 SPDLOG_ERROR("[UObjectHook] Unsupported persistent property type {}", utility::narrow(prop_t_name));
                 break;
@@ -1596,7 +1648,18 @@ sdk::UObject* UObjectHook::StatePath::resolve() const {
         };
     }
 
-    return previous_object;
+    if (previous_data == nullptr || previous_data_desc == nullptr) {
+        return nullptr;
+    }
+
+    return ResolvedObject{(sdk::UObject*)previous_data, previous_data_desc};
+}
+
+void UObjectHook::on_frame() {
+    if (m_keybind_toggle_uobject_hook->is_key_down_once()) {
+        m_uobject_hook_disabled = !m_uobject_hook_disabled;
+        m_fixed_visibilities = false;
+    }
 }
 
 void UObjectHook::on_draw_ui() {
@@ -1608,6 +1671,14 @@ void UObjectHook::on_draw_ui() {
     }
 
     std::shared_lock _{m_mutex};
+
+    if (m_uobject_hook_disabled) {
+        ImGui::TextColored(ImVec4{1.0f, 0.0f, 0.0f, 1.0f}, _L("UObjectHook is disabled"));
+        if (ImGui::Button(_L("Re-enable"))) {
+            m_uobject_hook_disabled = false;
+        }
+        return;
+    }
 
     if (ImGui::Button(_L("Reload Persistent States"))) {
         reload_persistent_states();
@@ -1647,6 +1718,13 @@ void UObjectHook::draw_config() {
     m_enabled_at_startup->draw("Enabled at Startup");
     m_attach_lerp_enabled->draw("Enable Attach Lerp");
     m_attach_lerp_speed->draw("Attach Lerp Speed");
+
+    ImGui::SetNextItemOpen(true, ImGuiCond_::ImGuiCond_Once);
+    if (ImGui::TreeNode("UObjectHook Keybinds")) {
+        m_keybind_toggle_uobject_hook->draw("Disable UObjectHook Key");
+
+        ImGui::TreePop();
+    }
 }
 
 void UObjectHook::draw_developer() {
@@ -1683,11 +1761,13 @@ void UObjectHook::draw_main() {
                 auto comp = it.first;
                 std::wstring comp_name = comp->get_class()->get_fname().to_string() + L" " + comp->get_fname().to_string();
 
+                ImGui::PushID(comp);
                 if (ImGui::TreeNode(utility::narrow(comp_name).data())) {
                     ui_handle_object(comp);
 
                     ImGui::TreePop();
                 }
+                ImGui::PopID();
             }
 
             ImGui::TreePop();
@@ -1784,7 +1864,8 @@ void UObjectHook::draw_main() {
 
     // Display common objects like things related to the player
     if (ImGui::TreeNode(_L("Common Objects"))) {
-        auto world = sdk::UGameEngine::get()->get_world();
+        auto engine = sdk::UGameEngine::get();
+        auto world = engine != nullptr ? engine->get_world() : nullptr;
 
         if (world != nullptr) {
             if (ImGui::TreeNode(_L("PlayerController"))) {
@@ -2337,6 +2418,16 @@ void UObjectHook::ui_handle_scene_component(sdk::USceneComponent* comp) {
             props->hide = !visible;
             props->save_to_file();
         }
+    }
+
+    if (ImGui::TreeNode("Sockets")) {
+        const auto socket_names = comp->get_all_socket_names();
+
+        for (auto& name : socket_names) {
+            ImGui::Text("%s", utility::narrow(name.to_string()).data());
+        }
+
+        ImGui::TreePop();
     }
 }
 
@@ -2906,6 +2997,7 @@ void UObjectHook::ui_handle_properties(void* object, sdk::UStruct* uclass) {
                 display_context(value);
             }
             break;
+        case "UInt32Property"_fnv:
         case "IntProperty"_fnv:
             {
                 auto& value = *(int32_t*)((uintptr_t)object + ((sdk::FProperty*)prop)->get_offset());
@@ -2939,6 +3031,7 @@ void UObjectHook::ui_handle_properties(void* object, sdk::UStruct* uclass) {
                 void* addr = (void*)((uintptr_t)object + ((sdk::FProperty*)prop)->get_offset());
 
                 if (ImGui::TreeNode(utility::narrow(prop->get_field_name().to_string()).data())) {
+                    auto scope2 = m_path.enter(utility::narrow(prop->get_field_name().to_string()));
                     ui_handle_struct(addr, ((sdk::FStructProperty*)prop)->get_struct());
                     ImGui::TreePop();
                 }
@@ -3287,6 +3380,9 @@ std::vector<std::shared_ptr<UObjectHook::PersistentProperties>> UObjectHook::des
         if (state != nullptr) {
             state->path_to_json = json_file;
             result.push_back(state);
+            SPDLOG_INFO("[UObjectHook] Loaded persistent properties from {}", json_file.string());
+        } else {
+            SPDLOG_ERROR("[UObjectHook] {} does not appear to be a valid persistent properties file", json_file.string());
         }
     }
 

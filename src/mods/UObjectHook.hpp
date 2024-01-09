@@ -61,6 +61,7 @@ protected:
     void on_config_save(utility::Config& cfg) override;
 
     void on_pre_engine_tick(sdk::UGameEngine* engine, float delta) override;
+    void on_frame() override;
     void on_draw_sidebar_entry(std::string_view in_entry) override;
     void on_draw_ui() override;
 
@@ -248,6 +249,56 @@ private:
     std::unordered_set<sdk::USceneComponent*> m_components_with_spheres{};
     std::unordered_map<sdk::USceneComponent*, sdk::USceneComponent*> m_spawned_spheres_to_components{};
 
+    struct ResolvedObject {
+    public:
+        ResolvedObject() = default;
+        ResolvedObject(void* data, sdk::UStruct* definition) : data{data}, definition{definition} {}
+        ResolvedObject(std::nullptr_t) : data{nullptr}, definition{nullptr} {}
+
+        operator sdk::UObject*() const noexcept {
+            return object;
+        }
+
+        operator void*() const noexcept {
+            return data;
+        }
+
+        bool operator==(void* other) const noexcept {
+            return data == other;
+        }
+
+        bool operator==(sdk::UObject* other) const noexcept {
+            return object == other;
+        }
+
+        bool operator==(std::nullptr_t) const noexcept {
+            return data == nullptr;
+        }
+
+        bool operator!=(std::nullptr_t) const noexcept {
+            return data != nullptr;
+        }
+
+        template<typename T>
+        T as() const noexcept {
+            return (T)data;
+        }
+
+        template<typename T>
+        T as() noexcept {
+            return (T)data;
+        }
+
+    public:
+        union {
+            void* data{nullptr};
+            sdk::UObject* object;
+        };
+
+        sdk::UStruct* definition{nullptr};
+        bool is_object{false};
+    };
+
     class StatePath {
     public:
         struct PathScope {
@@ -311,7 +362,7 @@ private:
         }
 
         sdk::UObject* resolve_base_object() const;
-        sdk::UObject* resolve()  const;
+        ResolvedObject resolve()  const;
 
     private:
         void clear() {
@@ -397,9 +448,14 @@ private:
     ModToggle::Ptr m_attach_lerp_enabled{ModToggle::create(generate_name("AttachLerpEnabled"), true)};
     ModSlider::Ptr m_attach_lerp_speed{ModSlider::create(generate_name("AttachLerpSpeed"), 0.01f, 30.0f, 15.0f)};
 
+    ModKey::Ptr m_keybind_toggle_uobject_hook{ModKey::create(generate_name("ToggleUObjectHookKey"))};
+    bool m_uobject_hook_disabled{false};
+    bool m_fixed_visibilities{false};
+
     ValueList m_options{
         *m_enabled_at_startup,
         *m_attach_lerp_enabled,
-        *m_attach_lerp_speed
+        *m_attach_lerp_speed,
+        *m_keybind_toggle_uobject_hook
     };
 };

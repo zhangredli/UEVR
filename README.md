@@ -20,15 +20,18 @@ The Chinese localization branch of Universal Unreal Engine VR Mod (4/5)
 - Automatic handling of most in-game UI so it is projected into 3D space
 - Optional 3DOF motion controls out of the box in many games, essentially emulating a semi-native VR experience
 - Optional roomscale movement in many games, moving the player character itself in 3D space along with the headset
+- User-authored UI-based system for adding motion controls and first person to games that don't support them
 - In-game menu with shortcuts for adjusting settings
 - Access to various CVars for fixing broken shaders/effects/performance issues
 - Optional depth buffer integration for improved latency on some headsets
 - Per-game configurations
-- Plugin system/Blueprint support for modders to add additional features like motion controls
+- [C++ Plugin system](https://praydog.github.io/uevr-docs/plugins/getting_started.html) and [Blueprint support](https://praydog.github.io/uevr-docs/plugins/blueprint.html) for modders to add additional features like motion controls
 
 ## Getting Started
 
-1. Launch the frontend GUI
+Before launching, ensure you have installed .NET 6.0. It should tell you where to install it upon first open, but if not, you can [download it from here](https://dotnet.microsoft.com/en-us/download/dotnet/6.0)
+
+1. Launch UEVRInjector.exe
 2. Launch the target game
 3. Locate the game in the process dropdown list
 4. Select your desired runtime (OpenVR/OpenXR)
