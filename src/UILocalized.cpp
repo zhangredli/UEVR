@@ -268,6 +268,8 @@ void UILocalized::init_loc() {
     loc["Inheritance"] = _S("继承");
     loc["Functions"] = _S("方法");
     loc["Properties"] = _S("属性");
+    loc["UObjectHook is disabled"] = _S("UObjectHook已禁用");
+    loc["Re-enable"] = _S("重新启用");
 }
 
 const char* UILocalized::get_localized_text(const char* text) {
