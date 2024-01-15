@@ -1731,6 +1731,14 @@ void UObjectHook::draw_developer() {
     if (ImGui::Button(_L("Dump SDK"))) {
         SDKDumper::dump();
     }
+
+    ImGui::SetNextItemOpen(true, ImGuiCond_::ImGuiCond_Once);
+    if (ImGui::TreeNode("Debug Stats")) {
+        // uint64_t
+        ImGui::Text("Constructor calls: %llu", m_debug.constructor_calls);
+        ImGui::Text("Destructor calls: %llu", m_debug.destructor_calls);
+        ImGui::TreePop();
+    }
 }
 
 void UObjectHook::draw_main() {
@@ -2240,6 +2248,25 @@ void UObjectHook::ui_handle_scene_component(sdk::USceneComponent* comp) {
             auto existing = std::find_if(m_persistent_states.begin(), m_persistent_states.end(), [&](const auto& state2) {
                 return state2 != nullptr && state2->path.resolve() == comp;
             });
+
+            // Finetuning of the controller rotation offset
+            // Convert to pitch/yaw/roll first.
+            auto euler = utility::math::euler_angles_from_steamvr(state->rotation_offset);
+            if (ImGui::DragFloat3("RotationOffset", &euler.x, 0.01f)) {
+                // Convert back to quaternion
+                state->rotation_offset = glm::quat{glm::yawPitchRoll(-euler.y, euler.x, -euler.z)};
+
+                if (existing != m_persistent_states.end()) {
+                    (*existing)->state.rotation_offset = state->rotation_offset;
+                }
+            }
+
+            // Finetuning of the controller position offset.
+            if (ImGui::DragFloat3("PositionOffset", &state->location_offset.x, 0.01f)) {
+                if (existing != m_persistent_states.end()) {
+                    (*existing)->state.location_offset = state->location_offset;
+                }
+            }
 
             auto save_state_logic = [&](const std::vector<std::string>& path) {
                 auto json = serialize_mc_state(path, state);
@@ -2820,6 +2847,25 @@ void UObjectHook::ui_handle_functions(void* object, sdk::UStruct* uclass) {
                         }
                     }
                     break;
+                case "UInt32Property"_fnv:
+                case "IntProperty"_fnv:
+                case "EnumProperty"_fnv:
+                    {
+                        static int value = 0;
+                        ImGui::InputInt("Value", &value);
+
+                        if (ImGui::Button("Call")) {
+                            struct {
+                                int value{};
+                                char padding[0x10];
+                            } params{};
+
+                            params.value = value;
+
+                            object_real->process_event(func, &params);
+                        }
+                    }
+                    break;
 
                 default:
                     break;
@@ -3171,6 +3217,7 @@ void* UObjectHook::add_object(void* rcx, void* rdx, void* r8, void* r9) {
             obj = (sdk::UObjectBase*)rdx;
         }
 
+        ++hook->m_debug.constructor_calls;
         hook->add_new_object(obj);
     }
 
@@ -3184,6 +3231,8 @@ void* UObjectHook::destructor(sdk::UObjectBase* object, void* rdx, void* r8, voi
         std::unique_lock _{hook->m_mutex};
 
         if (auto it = hook->m_meta_objects.find(object); it != hook->m_meta_objects.end()) {
+            ++hook->m_debug.destructor_calls;
+
 #ifdef VERBOSE_UOBJECTHOOK
             SPDLOG_INFO("Removing object {:x} {:s}", (uintptr_t)object, utility::narrow(it->second->full_name));
 #endif

@@ -352,6 +352,10 @@ std::optional<std::string> VR::initialize_openxr() {
         // because the function requires the instance to be valid
         if (result != XR_SUCCESS) {
             m_openxr->error = "Could not create openxr instance: " + std::to_string((int32_t)result);
+            if (result == XR_ERROR_LIMIT_REACHED) {
+                m_openxr->error = "Could not create openxr instance: XR_ERROR_LIMIT_REACHED\n"
+                    "Ensure that the OpenXR plugin has been renamed or deleted from the game's binaries folder.";
+            }
             spdlog::error("[VR] {}", m_openxr->error.value());
 
             return std::nullopt;
@@ -685,6 +689,11 @@ bool VR::on_message(HWND wnd, UINT message, WPARAM w_param, LPARAM l_param) {
 void VR::on_xinput_get_state(uint32_t* retval, uint32_t user_index, XINPUT_STATE* state) {
     ZoneScopedN(__FUNCTION__);
 
+    if (std::chrono::steady_clock::now() - m_last_engine_tick > std::chrono::seconds(1)) {
+        SPDLOG_INFO_EVERY_N_SEC(1, "[VR] XInputGetState called, but engine tick hasn't been called in over a second. Is the game loading?");
+        update_action_states();
+    }
+
     if (*retval == ERROR_SUCCESS) {
         // Once here for normal gamepads, and once for the spoofed gamepad at the end
         update_imgui_state_from_xinput_state(*state, false);
@@ -865,8 +874,37 @@ void VR::on_xinput_get_state(uint32_t* retval, uint32_t user_index, XINPUT_STATE
     state->Gamepad.sThumbRX = (int16_t)std::clamp<float>(((float)state->Gamepad.sThumbRX + right_joystick_axis.x * 32767.0f), -32767.0f, 32767.0f);
     state->Gamepad.sThumbRY = (int16_t)std::clamp<float>(((float)state->Gamepad.sThumbRY + right_joystick_axis.y * 32767.0f), -32767.0f, 32767.0f);
 
+    bool already_dpad_shifted{false};
+
+    if (m_dpad_gesture_state.direction != DPadGestureState::Direction::NONE) {
+        already_dpad_shifted = true;
+
+        if ((m_dpad_gesture_state.direction & DPadGestureState::Direction::UP) != 0) {
+            state->Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_UP;
+        }
+
+        if ((m_dpad_gesture_state.direction & DPadGestureState::Direction::RIGHT) != 0) {
+            state->Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_RIGHT;
+        }
+
+        if ((m_dpad_gesture_state.direction & DPadGestureState::Direction::DOWN) != 0) {
+            state->Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_DOWN;
+        }
+
+        if ((m_dpad_gesture_state.direction & DPadGestureState::Direction::LEFT) != 0) {
+            state->Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_LEFT;
+        }
+
+        // Zero out the thumbstick values
+        state->Gamepad.sThumbLX = 0;
+        state->Gamepad.sThumbLY = 0;
+
+        std::scoped_lock _{m_dpad_gesture_state.mtx};
+        m_dpad_gesture_state.direction = DPadGestureState::Direction::NONE;
+    }
+
     // Touching the thumbrest allows us to use the thumbstick as a dpad.  Additional options are for controllers without capacitives/games that rely solely on DPad
-    if (m_dpad_shifting->value()) {
+    if (!already_dpad_shifted && m_dpad_shifting->value()) {
         bool button_touch_inactive{true};
         bool thumbrest_check{false};
 
@@ -1035,9 +1073,22 @@ void VR::update_imgui_state_from_xinput_state(XINPUT_STATE& state, bool is_vr_co
             return;
         }
 
+        bool should_open = true;
+
         const auto now = std::chrono::steady_clock::now();
 
-        if (now - m_last_xinput_l3_r3_menu_open >= std::chrono::seconds(1)) {
+        if (FrameworkConfig::get()->is_l3_r3_long_press() && !g_framework->is_drawing_ui()) {
+            if (!m_xinput_context.menu_longpress_begin_held) {
+                m_xinput_context.menu_longpress_begin = now;
+            }
+
+            m_xinput_context.menu_longpress_begin_held = true;
+            should_open = (now - m_xinput_context.menu_longpress_begin) >= std::chrono::seconds(1);
+        } else {
+            m_xinput_context.menu_longpress_begin_held = false;
+        }
+
+        if (should_open && now - m_last_xinput_l3_r3_menu_open >= std::chrono::seconds(1)) {
             m_last_xinput_l3_r3_menu_open = std::chrono::steady_clock::now();
             g_framework->set_draw_ui(!g_framework->is_drawing_ui());
 
@@ -1045,6 +1096,7 @@ void VR::update_imgui_state_from_xinput_state(XINPUT_STATE& state, bool is_vr_co
         }
     } else if (is_using_this_controller) {
         m_xinput_context.headlocked_begin_held = false;
+        m_xinput_context.menu_longpress_begin_held = false;
     }
 
     // We need to adjust the stick values based on the selected movement orientation value if the user wants to do this
@@ -1113,13 +1165,15 @@ void VR::update_imgui_state_from_xinput_state(XINPUT_STATE& state, bool is_vr_co
         io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
 
         // Headlocked aim toggle
-        if ((state.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB) != 0 && (state.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB) != 0) {
-            if (!m_xinput_context.headlocked_begin_held) {
-                m_xinput_context.headlocked_begin = std::chrono::steady_clock::now();
-                m_xinput_context.headlocked_begin_held = true;
+        if (!FrameworkConfig::get()->is_l3_r3_long_press()) {
+            if ((state.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB) != 0 && (state.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB) != 0) {
+                if (!m_xinput_context.headlocked_begin_held) {
+                    m_xinput_context.headlocked_begin = std::chrono::steady_clock::now();
+                    m_xinput_context.headlocked_begin_held = true;
+                }
+            } else {
+                m_xinput_context.headlocked_begin_held = false;
             }
-        } else {
-            m_xinput_context.headlocked_begin_held = false;
         }
 
         // Now that we're drawing the UI, check for special button combos the user can use as shortcuts
@@ -1313,6 +1367,7 @@ void VR::on_pre_engine_tick(sdk::UGameEngine* engine, float delta) {
     ZoneScopedN(__FUNCTION__);
 
     m_cvar_manager->on_pre_engine_tick(engine, delta);
+    m_last_engine_tick = std::chrono::steady_clock::now();
 
     if (!get_runtime()->loaded || !is_hmd_active()) {
         return;
@@ -1481,9 +1536,11 @@ void VR::update_hmd_state(bool from_view_extensions, uint32_t frame_count) {
 void VR::update_action_states() {
     ZoneScopedN(__FUNCTION__);
 
+    std::scoped_lock _{m_actions_mtx};
+
     auto runtime = get_runtime();
 
-    if (runtime->wants_reinitialize) {
+    if (runtime == nullptr || runtime->wants_reinitialize) {
         return;
     }
 
@@ -1555,6 +1612,71 @@ void VR::update_action_states() {
     if (once2) {
         spdlog::info("VR: Updated action states");
         once2 = false;
+    }
+
+    update_dpad_gestures();
+}
+
+void VR::update_dpad_gestures() {
+    if (!is_hmd_active()) {
+        return;
+    }
+
+    const auto dpad_method = get_dpad_method();
+    if (dpad_method != DPadMethod::GESTURE_HEAD && dpad_method != DPadMethod::GESTURE_HEAD_RIGHT) {
+        return;
+    }
+
+    const auto wanted_index = dpad_method == DPadMethod::GESTURE_HEAD ? get_left_controller_index() : get_right_controller_index();
+
+    const auto controller_pos = glm::vec3{get_position(wanted_index)};
+    const auto hmd_transform = get_hmd_transform(m_frame_count);
+
+    // Check if controller is near HMD
+    const auto dist = glm::length(controller_pos - glm::vec3{hmd_transform[3]});
+
+    if (dist > 0.2f) {
+        return;
+    }
+
+    const auto dir_to_left = glm::normalize(controller_pos - glm::vec3{hmd_transform[3]});
+    const auto hmd_dir = glm::quat{glm::extractMatrixRotation(hmd_transform)} * glm::vec3{0.0f, 0.0f, 1.0f};
+
+    const auto angle = glm::acos(glm::dot(dir_to_left, hmd_dir));
+
+    constexpr float threshold = glm::radians(120.0f);
+
+    if (angle > threshold) {
+        return;
+    }
+
+    // Make sure the angle is to the left/right of the HMD
+    if (dpad_method == DPadMethod::GESTURE_HEAD_RIGHT) {
+        if (glm::cross(dir_to_left, hmd_dir).y > 0.0f) {
+            return;
+        }
+    } else if (glm::cross(dir_to_left, hmd_dir).y < 0.0f) {
+        return;
+    }
+
+    // Send a vibration pulse to the controller
+    const auto chosen_joystick = dpad_method == DPadMethod::GESTURE_HEAD ? m_left_joystick : m_right_joystick;
+    trigger_haptic_vibration(0.0f, 0.1f, 1.0f, 5.0f, chosen_joystick);
+
+    std::scoped_lock _{m_dpad_gesture_state.mtx};
+
+    const auto left_joystick_axis = get_joystick_axis(chosen_joystick);
+
+    if (left_joystick_axis.x < -0.5f) {
+        m_dpad_gesture_state.direction |= DPadGestureState::Direction::LEFT;
+    } else if (left_joystick_axis.x > 0.5f) {
+        m_dpad_gesture_state.direction |= DPadGestureState::Direction::RIGHT;
+    } 
+    
+    if (left_joystick_axis.y < -0.5f) {
+        m_dpad_gesture_state.direction |= DPadGestureState::Direction::DOWN;
+    } else if (left_joystick_axis.y > 0.5f) {
+        m_dpad_gesture_state.direction |= DPadGestureState::Direction::UP;
     }
 }
 
@@ -1788,7 +1910,7 @@ void VR::on_frame() {
         m_rt_modifier.draw = false;
     }
 
-    if (is_allowed_draw_window && m_xinput_context.headlocked_begin_held) {
+    if (is_allowed_draw_window && m_xinput_context.headlocked_begin_held && !FrameworkConfig::get()->is_l3_r3_long_press()) {
         const auto rt_size = g_framework->get_rt_size();
 
         ImGui::Begin(_L("AimMethod Notification"), nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav);

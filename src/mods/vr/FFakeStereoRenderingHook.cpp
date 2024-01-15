@@ -3827,6 +3827,10 @@ __forceinline void FFakeStereoRenderingHook::calculate_stereo_view_offset(
         GameThreadWorker::get().execute();
     }
 
+    if (vr->is_sceneview_compatibility_enabled() && !g_hook->m_inside_manual_view_offset) {
+        return;
+    }
+
     const auto& mods = g_framework->get_mods()->get_mods();
 
     if (!is_full_pass) {
@@ -5903,6 +5907,13 @@ void FFakeStereoRenderingHook::attempt_hook_update_viewport_rhi(uintptr_t return
 
             if (*(void**)update_viewport_rhi_ptr == nullptr || IsBadReadPtr(*(void**)update_viewport_rhi_ptr, sizeof(void*))) {
                 SPDLOG_ERROR("Failed to find UpdateViewportRHI!");
+                return;
+            }
+
+            // Make sure this is no displacement reference to this. This can mean we accidentally found the vtable for IViewportRenderTargetProvider
+            // The vfunc pointer should be in the middle of the vtable, not the start.
+            if (utility::scan_displacement_reference(*utility::get_module_within(*init_dynamic_rhi), update_viewport_rhi_ptr)) {
+                SPDLOG_ERROR("Found displacement reference to UpdateViewportRHI, this is probably the vtable for IViewportRenderTargetProvider, aborting!");
                 return;
             }
 
