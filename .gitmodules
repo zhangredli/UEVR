@@ -6,7 +6,7 @@
 	url = https://github.com/gabime/spdlog
 [submodule "dependencies/submodules/imgui"]
 	path = dependencies/submodules/imgui
-	url = https://github.com/ocornut/imgui.git
+	url = https://github.com/zhangredli/imgui.git
 [submodule "dependencies/submodules/UESDK"]
 	path = dependencies/submodules/UESDK
 	url = git@github.com:praydog/UESDK.git
