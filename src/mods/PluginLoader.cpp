@@ -971,38 +971,38 @@ void PluginLoader::reload_plugins() {
 void PluginLoader::on_draw_ui() {
     std::scoped_lock _{m_mux};
 
-    if (ImGui::Button(_L("Attempt Unload Plugins"))) {
+    if (ImGui::Button("Attempt Unload Plugins")) {
         attempt_unload_plugins();
     }
 
-    if (ImGui::Button(_L("Reload Plugins"))) {
+    if (ImGui::Button("Reload Plugins")) {
         attempt_unload_plugins();
         reload_plugins();
     }
 
     if (!m_plugins.empty()) {
-        ImGui::Text(_L("Loaded plugins:"));
+        ImGui::Text("Loaded plugins:");
 
         for (auto&& [name, _] : m_plugins) {
-            ImGui::Text(_L(name.c_str()));
+            ImGui::Text(name.c_str());
         }
     } else {
-        ImGui::Text(_L("No plugins loaded."));
+        ImGui::Text("No plugins loaded.");
     }
 
     if (!m_plugin_load_errors.empty()) {
         ImGui::Spacing();
-        ImGui::Text(_L("Errors:"));
+        ImGui::Text("Errors:");
         for (auto&& [name, error] : m_plugin_load_errors) {
-            ImGui::Text("%s - %s", _L(name.c_str()), _L(error.c_str()));
+            ImGui::Text("%s - %s", name.c_str(), error.c_str());
         }
     }
 
     if (!m_plugin_load_warnings.empty()) {
         ImGui::Spacing();
-        ImGui::Text(_L("Warnings:"));
+        ImGui::Text("Warnings:");
         for (auto&& [name, warning] : m_plugin_load_warnings) {
-            ImGui::Text("%s - %s", _L(name.c_str()), _L(warning.c_str()));
+            ImGui::Text("%s - %s", name.c_str(), warning.c_str());
         }
     }
 }

@@ -1083,6 +1083,7 @@ void Framework::draw_ui() {
         set_imgui_style();
         m_current_theme = get_imgui_theme_value();
     }
+    UILocalized::set_language();
 
     ImGui::GetIO().MouseDrawCursor = m_draw_ui || FrameworkConfig::get()->is_always_show_cursor();
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange; // causes bugs with the cursor
@@ -1160,29 +1161,29 @@ void Framework::draw_ui() {
     ImGui::Columns(2);
     ImGui::BeginGroup();
 
-    ImGui::Checkbox(_L("Transparency"), &m_ui_option_transparent);
+    ImGui::Checkbox("Transparency", &m_ui_option_transparent);
     ImGui::SameLine();
     ImGui::Text("(?)");
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(_L("Makes the UI transparent when not focused."));
+        ImGui::SetTooltip("Makes the UI transparent when not focused.");
     }
-    ImGui::Checkbox(_L("Input Passthrough"), &m_ui_passthrough);
+    ImGui::Checkbox("Input Passthrough", &m_ui_passthrough);
     ImGui::SameLine();
     ImGui::Text("(?)");
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(_L("Allows mouse and keyboard inputs to register to the game while the UI is focused."));
+        ImGui::SetTooltip("Allows mouse and keyboard inputs to register to the game while the UI is focused.");
     }
 
-    FrameworkConfig::get()->get_advanced_mode()->draw(_L("Show Advanced Options"));
+    FrameworkConfig::get()->get_advanced_mode()->draw("Show Advanced Options");
 
     ImGui::SameLine();
     ImGui::Text("(?)");
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(_L("Show additional options for greater control over various settings."));
+        ImGui::SetTooltip("Show additional options for greater control over various settings.");
     }
 
     if (m_mods_fully_initialized) {
-        if (ImGui::Button(_L("Reset to Default Settings"))) {
+        if (ImGui::Button("Reset to Default Settings")) {
             reset_config();
         }
     }
@@ -1191,10 +1192,10 @@ void Framework::draw_ui() {
     ImGui::NextColumn();
 
     ImGui::BeginGroup();
-    ImGui::Text(_L("Keyboard Menu Key: Insert"));
-    ImGui::Text(_L("Gamepad L3 + R3: Toggle Menu"));
-    ImGui::Text(_L("Gamepad RT: Shortcuts"));
-    ImGui::Text(_L("Gamepad LB/RB: Change Sidebar Page"));
+    ImGui::Text("Keyboard Menu Key: Insert");
+    ImGui::Text("Gamepad L3 + R3: Toggle Menu");
+    ImGui::Text("Gamepad RT: Shortcuts");
+    ImGui::Text("Gamepad LB/RB: Change Sidebar Page");
 
     ImGui::EndGroup();
     ImGui::EndGroup();
@@ -1216,7 +1217,7 @@ void Framework::draw_ui() {
         ImGui::BeginChild("UEVRLeftPane", ImVec2(0, 0), true);
         auto dcs = [&](const char* label, int32_t page_value) -> bool {
             ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.5f, 0.5f));
-            if (ImGui::Selectable(_L(label), m_sidebar_state.selected_entry == page_value)) {
+            if (ImGui::Selectable(label, m_sidebar_state.selected_entry == page_value)) {
                 m_sidebar_state.selected_entry = page_value;
                 ImGui::PopStyleVar();
                 return true;
@@ -1279,12 +1280,11 @@ void Framework::draw_ui() {
                                 }
                             }
 
-                            ImGui::Text(_L(range.mod->get_name().data()));
+                            ImGui::Text(range.mod->get_name().data());
                         }
                     }
 
                     ImGui::PushID(i);
-
                     dcs(sidebar_entries[i].m_label.c_str(), i);
                     ImGui::PopID();
                 }
@@ -1396,13 +1396,13 @@ void Framework::draw_ui() {
 }
 
 void Framework::draw_about() {
-    ImGui::Text(_L("Author: praydog"));
-    ImGui::Text(_L("vrzwk"));
-    ImGui::Text(_L("Unreal Engine VR"));
+    ImGui::Text("Author: praydog");
+    ImGui::Text("vrzwk");
+    ImGui::Text("Unreal Engine VR");
     ImGui::Text("https://github.com/praydog/UEVR");
     ImGui::Text("http://praydog.com");
 
-    if (ImGui::CollapsingHeader(_L("Licenses"))) {
+    if (ImGui::CollapsingHeader("Licenses")) {
         ImGui::TreePush("Licenses");
 
         struct License {

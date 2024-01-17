@@ -282,6 +282,10 @@ const auto quat_converter = glm::quat{Matrix4x4f {
 void UObjectHook::on_pre_calculate_stereo_view_offset(void* stereo_device, const int32_t view_index, Rotator<float>* view_rotation, 
                                         const float world_to_meters, Vector3f* view_location, bool is_double)
 {
+    if (!m_fully_hooked) {
+        return;
+    }
+
     auto& vr = VR::get();
 
     if (!vr->is_hmd_active()) {
@@ -351,6 +355,10 @@ void UObjectHook::on_pre_calculate_stereo_view_offset(void* stereo_device, const
 void UObjectHook::on_post_calculate_stereo_view_offset(void* stereo_device, const int32_t view_index, Rotator<float>* view_rotation, 
                                                     const float world_to_meters, Vector3f* view_location, bool is_double)
 {
+    if (!m_fully_hooked) {
+        return;
+    }
+
     if (!VR::get()->is_hmd_active()) {
         return;
     }
@@ -405,8 +413,10 @@ void UObjectHook::tick_attachments(Rotator<float>* view_rotation, const float wo
     const auto hmd_origin = glm::vec3{vr->get_transform(0)[3]};
     const auto pos = glm::vec3{rotation_offset * (hmd_origin - glm::vec3{vr->get_standing_origin()})};
 
+    const auto adjusted_world_to_meters = world_to_meters * vr->get_world_scale();
+
     const auto view_quat_inverse_flat = utility::math::flatten(view_quat_inverse);
-    const auto offset1 = quat_converter * (glm::normalize(view_quat_inverse_flat) * (pos * world_to_meters));
+    const auto offset1 = quat_converter * (glm::normalize(view_quat_inverse_flat) * (pos * adjusted_world_to_meters));
 
     glm::vec3 final_position{};
 
@@ -462,8 +472,8 @@ void UObjectHook::tick_attachments(Rotator<float>* view_rotation, const float wo
     right_hand_position = glm::vec3{rotation_offset * (right_hand_position - hmd_origin)};
     left_hand_position = glm::vec3{rotation_offset * (left_hand_position - hmd_origin)};
 
-    right_hand_position = quat_converter * (glm::normalize(view_quat_inverse_flat) * (right_hand_position * world_to_meters));
-    left_hand_position = quat_converter * (glm::normalize(view_quat_inverse_flat) * (left_hand_position * world_to_meters));
+    right_hand_position = quat_converter * (glm::normalize(view_quat_inverse_flat) * (right_hand_position * adjusted_world_to_meters));
+    left_hand_position = quat_converter * (glm::normalize(view_quat_inverse_flat) * (left_hand_position * adjusted_world_to_meters));
 
     right_hand_position = final_position - right_hand_position;
     left_hand_position = final_position - left_hand_position;
@@ -1666,27 +1676,27 @@ void UObjectHook::on_draw_ui() {
     activate();
 
     if (!m_fully_hooked) {
-        ImGui::Text(_L("Waiting for UObjectBase to be hooked..."));
+        ImGui::Text("Waiting for UObjectBase to be hooked...");
         return;
     }
 
     std::shared_lock _{m_mutex};
 
     if (m_uobject_hook_disabled) {
-        ImGui::TextColored(ImVec4{1.0f, 0.0f, 0.0f, 1.0f}, _L("UObjectHook is disabled"));
-        if (ImGui::Button(_L("Re-enable"))) {
+        ImGui::TextColored(ImVec4{1.0f, 0.0f, 0.0f, 1.0f}, "UObjectHook is disabled");
+        if (ImGui::Button("Re-enable")) {
             m_uobject_hook_disabled = false;
         }
         return;
     }
 
-    if (ImGui::Button(_L("Reload Persistent States"))) {
+    if (ImGui::Button("Reload Persistent States")) {
         reload_persistent_states();
     }
 
     ImGui::SameLine();
 
-    if (ImGui::Button(_L("Destroy Persistent States"))) {
+    if (ImGui::Button("Destroy Persistent States")) {
         reset_persistent_states();
 
         const auto uobjecthook_dir = get_persistent_dir();
@@ -1728,7 +1738,7 @@ void UObjectHook::draw_config() {
 }
 
 void UObjectHook::draw_developer() {
-    if (ImGui::Button(_L("Dump SDK"))) {
+    if (ImGui::Button("Dump SDK")) {
         SDKDumper::dump();
     }
 
@@ -1743,10 +1753,10 @@ void UObjectHook::draw_developer() {
 
 void UObjectHook::draw_main() {
     if (!m_motion_controller_attached_components.empty()) {
-        const auto made = ImGui::TreeNode(_L("Attached Components"));
+        const auto made = ImGui::TreeNode("Attached Components");
 
         if (made) {
-            if (ImGui::Button(_L("Detach all"))) {
+            if (ImGui::Button("Detach all")) {
                 m_motion_controller_attached_components.clear();
 
                 for (auto persistent_state : m_persistent_states) {
@@ -1782,10 +1792,10 @@ void UObjectHook::draw_main() {
         }
     }
 
-    const auto made2 = m_camera_attach.object != nullptr && ImGui::TreeNode(_L("Attached Camera Object"));
+    const auto made2 = m_camera_attach.object != nullptr && ImGui::TreeNode("Attached Camera Object");
 
     if (made2) {
-        if (ImGui::Button(_L("Detach Camera"))) {
+        if (ImGui::Button("Detach Camera")) {
             m_camera_attach.object = nullptr;
             m_camera_attach.offset = glm::vec3{0.0f, 0.0f, 0.0f};
 
@@ -1802,7 +1812,7 @@ void UObjectHook::draw_main() {
     }
 
     if (m_overlap_detection_actor == nullptr) {
-        if (ImGui::Button(_L("Spawn Overlapper"))) {
+        if (ImGui::Button("Spawn Overlapper")) {
             spawn_overlapper(0);
             spawn_overlapper(1);
         }
@@ -1810,16 +1820,16 @@ void UObjectHook::draw_main() {
         m_overlap_detection_actor = nullptr;
     } else {
         ImGui::SetNextItemOpen(true, ImGuiCond_Once);
-        const auto made = ImGui::TreeNode(_L("Overlapped Objects"));
+        const auto made = ImGui::TreeNode("Overlapped Objects");
 
         if (made) {
-            if (ImGui::Button(_L("Destroy Overlapper"))) {
+            if (ImGui::Button("Destroy Overlapper")) {
                 destroy_overlapper();
             }
 
             ImGui::SameLine();
             bool attach_all = false;
-            if (ImGui::Button(_L("Attach all"))) {
+            if (ImGui::Button("Attach all")) {
                 attach_all = true;
             }
 
@@ -1853,9 +1863,9 @@ void UObjectHook::draw_main() {
         }
     }
 
-    ImGui::Text(_L("Objects: %zu (%zu actual)"), m_objects.size(), sdk::FUObjectArray::get()->get_object_count());
+    ImGui::Text("Objects: %zu (%zu actual)", m_objects.size(), sdk::FUObjectArray::get()->get_object_count());
 
-    if (ImGui::TreeNode(_L("Recent Objects"))) {
+    if (ImGui::TreeNode("Recent Objects")) {
         for (auto& object : m_most_recent_objects) {
             if (!this->exists_unsafe(object)) {
                 continue;
@@ -1871,25 +1881,25 @@ void UObjectHook::draw_main() {
     }
 
     // Display common objects like things related to the player
-    if (ImGui::TreeNode(_L("Common Objects"))) {
+    if (ImGui::TreeNode("Common Objects")) {
         auto engine = sdk::UGameEngine::get();
         auto world = engine != nullptr ? engine->get_world() : nullptr;
 
         if (world != nullptr) {
-            if (ImGui::TreeNode(_L("PlayerController"))) {
-                auto scope = m_path.enter_clean(_L("Player Controller"));
+            if (ImGui::TreeNode("PlayerController")) {
+                auto scope = m_path.enter_clean("Player Controller");
                 auto player_controller = sdk::UGameplayStatics::get()->get_player_controller(world, 0);
 
                 if (player_controller != nullptr) {
                     ui_handle_object(player_controller);
                 } else {
-                    ImGui::Text(_L("No player controller"));
+                    ImGui::Text("No player controller");
                 }
 
                 ImGui::TreePop();
             }
 
-            if (ImGui::TreeNode(_L("Acknowledged Pawn"))) {
+            if (ImGui::TreeNode("Acknowledged Pawn")) {
                 auto scope = m_path.enter_clean("Acknowledged Pawn");
                 auto player_controller = sdk::UGameplayStatics::get()->get_player_controller(world, 0);
 
@@ -1899,16 +1909,16 @@ void UObjectHook::draw_main() {
                     if (pawn != nullptr) {
                         ui_handle_object(pawn);
                     } else {
-                        ImGui::Text(_L("No pawn"));
+                        ImGui::Text("No pawn");
                     }
                 } else {
-                    ImGui::Text(_L("No player controller"));
+                    ImGui::Text("No player controller");
                 }
 
                 ImGui::TreePop();
             }
 
-            if (ImGui::TreeNode(_L("Camera Manager"))) {
+            if (ImGui::TreeNode("Camera Manager")) {
                 auto scope = m_path.enter_clean("Camera Manager");
                 auto player_controller = sdk::UGameplayStatics::get()->get_player_controller(world, 0);
 
@@ -1918,30 +1928,30 @@ void UObjectHook::draw_main() {
                     if (camera_manager != nullptr) {
                         ui_handle_object((sdk::UObject*)camera_manager);
                     } else {
-                        ImGui::Text(_L("No camera manager"));
+                        ImGui::Text("No camera manager");
                     }
                 } else {
-                    ImGui::Text(_L("No player controller"));
+                    ImGui::Text("No player controller");
                 }
 
                 ImGui::TreePop();
             }
 
-            if (ImGui::TreeNode(_L("World"))) {
+            if (ImGui::TreeNode("World")) {
                 auto scope = m_path.enter_clean("World");
                 ui_handle_object(world);
                 ImGui::TreePop();
             }
         } else {
-            ImGui::Text(_L("No world"));
+            ImGui::Text("No world");
         }
 
         ImGui::TreePop();
     }
 
-    if (ImGui::TreeNode(_L("Objects by class"))) {
+    if (ImGui::TreeNode("Objects by class")) {
         static char filter[256]{};
-        ImGui::InputText(_L("Filter"), filter, sizeof(filter));
+        ImGui::InputText("Filter", filter, sizeof(filter));
 
         const bool filter_empty = std::string_view{filter}.empty();
 
@@ -2042,8 +2052,7 @@ void UObjectHook::draw_main() {
                 if (uclass->is_a(sdk::AActor::static_class())) {
                     static char component_add_name[256]{};
 
-                    if (ImGui::InputText(_L("Add Component Permanently"), component_add_name, sizeof(component_add_name),
-                            ImGuiInputTextFlags_::ImGuiInputTextFlags_EnterReturnsTrue)) {
+                    if (ImGui::InputText("Add Component Permanently", component_add_name, sizeof(component_add_name), ImGuiInputTextFlags_::ImGuiInputTextFlags_EnterReturnsTrue)) {
                         const auto component_c = sdk::find_uobject<sdk::UClass>(utility::widen(component_add_name));
 
                         if (component_c != nullptr) {
@@ -2119,11 +2128,11 @@ void UObjectHook::draw_main() {
                             }
                         };
 
-                        if (ImGui::Button(_L("Copy Name"))) {
+                        if (ImGui::Button("Copy Name")) {
                             sc(utility::narrow(m_meta_objects[object]->full_name));
                         }
 
-                        if (ImGui::Button(_L("Copy Address"))) {
+                        if (ImGui::Button("Copy Address")) {
                             const auto hex = (std::stringstream{} << std::hex << (uintptr_t)object).str();
                             sc(hex);
                         }
@@ -2168,7 +2177,7 @@ void UObjectHook::ui_handle_object(sdk::UObject* object) {
     static const auto widget_component_t = sdk::find_uobject<sdk::UClass>(L"Class /Script/UMG.WidgetComponent");
 
     if (uclass->is_a(widget_component_t)) {
-        if (ImGui::Button(_L("Set to Screen Space"))) {
+        if (ImGui::Button("Set to Screen Space")) {
             static const auto set_widget_space_fn = uclass->find_function(L"SetWidgetSpace");
 
             if (set_widget_space_fn != nullptr) {
@@ -2208,7 +2217,7 @@ void UObjectHook::ui_handle_scene_component(sdk::USceneComponent* comp) {
     bool attached = m_motion_controller_attached_components.contains(comp);
 
     if (attached) {
-        if (ImGui::Button(_L("Detach"))) {
+        if (ImGui::Button("Detach")) {
             m_motion_controller_attached_components.erase(comp);
 
             auto existing = std::find_if(m_persistent_states.begin(), m_persistent_states.end(), [&](const auto& state2) {
@@ -2225,7 +2234,7 @@ void UObjectHook::ui_handle_scene_component(sdk::USceneComponent* comp) {
             ImGui::SameLine();
             auto& state = m_motion_controller_attached_components[comp];
 
-            if (ImGui::Checkbox(_L("Adjust"), &state->adjusting)) {
+            if (ImGui::Checkbox("Adjust", &state->adjusting)) {
                 if (state->adjusting && m_overlap_detection_actor == nullptr) {
                     VR::get()->set_aim_allowed(false);
                     g_framework->set_draw_ui(false);
@@ -2234,7 +2243,7 @@ void UObjectHook::ui_handle_scene_component(sdk::USceneComponent* comp) {
 
             ImGui::SameLine();
 
-            if (ImGui::Checkbox(_L("Permanent Change"), &state->permanent)) {
+            if (ImGui::Checkbox("Permanent Change", &state->permanent)) {
                 // Locate the existing persistent state if it exists
                 auto existing = std::find_if(m_persistent_states.begin(), m_persistent_states.end(), [&](const auto& state2) {
                     return state2 != nullptr && state2->path.resolve() == comp;
@@ -2307,50 +2316,50 @@ void UObjectHook::ui_handle_scene_component(sdk::USceneComponent* comp) {
             // First one is for checking whether we already have an existing persistent state
             // with its own path.
             if (existing != m_persistent_states.end()) {
-                if (ImGui::Button(_L("Save state"))) {
+                if (ImGui::Button("Save state")) {
                     save_state_logic((*existing)->path.path());
                 }
             } else if (m_path.has_valid_base()) {
-                if (ImGui::Button(_L("Save state"))) {
+                if (ImGui::Button("Save state")) {
                     save_state_logic(m_path.path());
                 }
             } else {
                 if (auto path = try_get_path(comp); path.has_value()) {
-                    if (ImGui::Button(_L("Save state"))) {
+                    if (ImGui::Button("Save state")) {
                         save_state_logic(path->path());
                     }
                 } else {
-                    ImGui::Text(_L("Can't save, did not start from a valid base or none of the allowed bases can reach this component"));
+                    ImGui::Text("Can't save, did not start from a valid base or none of the allowed bases can reach this component");
                 }
             }
         }
     } else {
         if (m_camera_attach.object != comp) {
-            if (ImGui::Button(_L("Attach left"))) {
+            if (ImGui::Button("Attach left")) {
                 m_motion_controller_attached_components[comp] = std::make_shared<MotionControllerState>();
                 m_motion_controller_attached_components[comp]->hand = 0;
             }
 
             ImGui::SameLine();
 
-            if (ImGui::Button(_L("Attach right"))) {
+            if (ImGui::Button("Attach right")) {
                 m_motion_controller_attached_components[comp] = std::make_shared<MotionControllerState>();
                 m_motion_controller_attached_components[comp]->hand = 1;
             }
 
-            if (ImGui::Button(_L("Attach Camera to"))) {
+            if (ImGui::Button("Attach Camera to")) {
                 m_camera_attach.object = comp;
                 m_camera_attach.offset = glm::vec3{0.0f, 0.0f, 0.0f};
             }
 
             ImGui::SameLine();
 
-            if (ImGui::Button(_L("Attach Camera to (Relative)"))) {
+            if (ImGui::Button("Attach Camera to (Relative)")) {
                 m_camera_attach.object = comp;
                 m_camera_attach.offset = glm::vec3{0.0f, 0.0f, m_last_camera_location.z - comp->get_world_location().z};
             }
         } else {
-            if (ImGui::Button(_L("Detach"))) {
+            if (ImGui::Button("Detach")) {
                 m_camera_attach.object = nullptr;
                 m_camera_attach.offset = glm::vec3{0.0f, 0.0f, 0.0f};
 
@@ -2364,22 +2373,22 @@ void UObjectHook::ui_handle_scene_component(sdk::USceneComponent* comp) {
             ImGui::SameLine();
 
             if (m_persistent_camera_state != nullptr && m_persistent_camera_state->path.resolve() == comp) {
-                if (ImGui::Button(_L("Save state"))) {
+                if (ImGui::Button("Save state")) {
                     save_camera_state(m_persistent_camera_state->path.path());
                 }
             } else if (m_path.has_valid_base()) {
-                if (ImGui::Button(_L("Save state"))) {
+                if (ImGui::Button("Save state")) {
                     save_camera_state(m_path.path());
                 }
             } else if (auto path = try_get_path(comp); path.has_value()) {
-                if (ImGui::Button(_L("Save state"))) {
+                if (ImGui::Button("Save state")) {
                     save_camera_state(path->path());
                 }
             } else {
-                ImGui::Text(_L("Can't save, did not start from a valid base or none of the allowed bases can reach this component"));
+                ImGui::Text("Can't save, did not start from a valid base or none of the allowed bases can reach this component");
             }
 
-            if (ImGui::DragFloat3(_L("Camera Offset"), &m_camera_attach.offset.x, 0.1f)) {
+            if (ImGui::DragFloat3("Camera Offset", &m_camera_attach.offset.x, 0.1f)) {
                 if (m_persistent_camera_state != nullptr) {
                     m_persistent_camera_state->offset = m_camera_attach.offset;
                 }
@@ -2389,7 +2398,7 @@ void UObjectHook::ui_handle_scene_component(sdk::USceneComponent* comp) {
 
     bool visible = comp->is_visible();
 
-    if (ImGui::Checkbox(_L("Visible"), &visible)) {
+    if (ImGui::Checkbox("Visible", &visible)) {
         comp->set_visibility(visible, false);
 
         if (visible) {
@@ -2412,7 +2421,7 @@ void UObjectHook::ui_handle_scene_component(sdk::USceneComponent* comp) {
 
     ImGui::SameLine();
 
-    if (ImGui::Button(_L("Save Visibility State"))) {
+    if (ImGui::Button("Save Visibility State")) {
         std::shared_ptr<PersistentProperties> props{};
 
         // Find existing one if possible
@@ -2541,7 +2550,7 @@ void UObjectHook::ui_handle_material_interface(sdk::UObject* object) {
         return;
     }
 
-    if (ImGui::Button(_L("Apply to all actors"))) {
+    if (ImGui::Button("Apply to all actors")) {
         static const auto mesh_component_t = sdk::find_uobject<sdk::UClass>(L"Class /Script/Engine.StaticMeshComponent");
         static const auto create_dynamic_mat = mesh_component_t->find_function(L"CreateDynamicMaterialInstance");
         static const auto set_material_fn = mesh_component_t->find_function(L"SetMaterial");
@@ -2653,19 +2662,19 @@ void UObjectHook::ui_handle_actor(sdk::UObject* object) {
     auto actor = (sdk::AActor*)object;
 
     if (m_camera_attach.object != object ){
-        if (ImGui::Button(_L("Attach Camera to"))) {
+        if (ImGui::Button("Attach Camera to")) {
             m_camera_attach.object = object;
             m_camera_attach.offset = glm::vec3{0.0f, 0.0f, 0.0f};
         }
 
         ImGui::SameLine();
 
-        if (ImGui::Button(_L("Attach Camera to (Relative)"))) {
+        if (ImGui::Button("Attach Camera to (Relative)")) {
             m_camera_attach.object = object;
             m_camera_attach.offset = glm::vec3{0.0f, 0.0f, m_last_camera_location.z - actor->get_actor_location().z};
         }
     } else {
-        if (ImGui::Button(_L("Detach"))) {
+        if (ImGui::Button("Detach")) {
             m_camera_attach.object = nullptr;
             m_camera_attach.offset = glm::vec3{0.0f, 0.0f, 0.0f};
 
@@ -2677,22 +2686,22 @@ void UObjectHook::ui_handle_actor(sdk::UObject* object) {
         }
 
         if (m_persistent_camera_state != nullptr && m_persistent_camera_state->path.resolve() == object) {
-            if (ImGui::Button(_L("Save state"))) {
+            if (ImGui::Button("Save state")) {
                 save_camera_state(m_persistent_camera_state->path.path());
             }
         } else if (m_path.has_valid_base()) {
-            if (ImGui::Button(_L("Save state"))) {
+            if (ImGui::Button("Save state")) {
                 save_camera_state(m_path.path());
             }
         } else if (auto path = try_get_path(object); path.has_value()) {
-            if (ImGui::Button(_L("Save state"))) {
+            if (ImGui::Button("Save state")) {
                 save_camera_state(path->path());
             }
         } else {
-            ImGui::Text(_L("Can't save, did not start from a valid base or none of the allowed bases can reach this object"));
+            ImGui::Text("Can't save, did not start from a valid base or none of the allowed bases can reach this object");
         }
 
-        if (ImGui::DragFloat3(_L("Camera Offset"), &m_camera_attach.offset.x, 0.1f)) {
+        if (ImGui::DragFloat3("Camera Offset", &m_camera_attach.offset.x, 0.1f)) {
             if (m_persistent_camera_state != nullptr) {
                 m_persistent_camera_state->offset = m_camera_attach.offset;
             }
@@ -2701,8 +2710,7 @@ void UObjectHook::ui_handle_actor(sdk::UObject* object) {
 
     static char component_add_name[256]{};
 
-    if (ImGui::InputText(_L("Add Component"), component_add_name, sizeof(component_add_name),
-            ImGuiInputTextFlags_::ImGuiInputTextFlags_EnterReturnsTrue)) {
+    if (ImGui::InputText("Add Component", component_add_name, sizeof(component_add_name), ImGuiInputTextFlags_::ImGuiInputTextFlags_EnterReturnsTrue)) {
         const auto component_c = sdk::find_uobject<sdk::UClass>(utility::widen(component_add_name));
 
         if (component_c != nullptr) {
@@ -2756,7 +2764,7 @@ void UObjectHook::ui_handle_actor(sdk::UObject* object) {
         }
     }
 
-    if (ImGui::TreeNode(_L("Components"))) {
+    if (ImGui::TreeNode("Components")) {
         auto scope = m_path.enter("Components");
         auto components = actor->get_all_components();
 
@@ -2815,7 +2823,7 @@ void UObjectHook::ui_handle_functions(void* object, sdk::UStruct* uclass) {
             auto parameters = func->get_child_properties();
 
             if (parameters == nullptr || (parameters->get_next() == nullptr && parameters->get_field_name().to_string() == L"ReturnValue")) {
-                if (ImGui::Button(_L("Call"))) {
+                if (ImGui::Button("Call")) {
                     struct {
                         char poop[1024]{};
                     } params{};
@@ -2826,7 +2834,7 @@ void UObjectHook::ui_handle_functions(void* object, sdk::UStruct* uclass) {
                 switch (utility::hash(utility::narrow(parameters->get_class()->get_name().to_string()))) {
                 case "BoolProperty"_fnv:
                     {
-                    if (ImGui::Button(_L("Enable"))) {
+                        if (ImGui::Button("Enable")) {
                             struct {
                                 bool enabled{true};
                                 char padding[0x10];
@@ -2837,7 +2845,7 @@ void UObjectHook::ui_handle_functions(void* object, sdk::UStruct* uclass) {
 
                         ImGui::SameLine();
 
-                        if (ImGui::Button(_L("Disable"))) {
+                        if (ImGui::Button("Disable")) {
                             struct {
                                 bool enabled{false};
                                 char padding[0x10];
@@ -2927,7 +2935,7 @@ void UObjectHook::ui_handle_properties(void* object, sdk::UStruct* uclass) {
             }
 
             if (!previous_path.has_valid_base()) {
-                ImGui::Text(_L("Can't save, did not start from a valid base"));
+                ImGui::Text("Can't save, did not start from a valid base");
                 ImGui::EndPopup();
                 return;
             }
@@ -3017,11 +3025,11 @@ void UObjectHook::ui_handle_properties(void* object, sdk::UStruct* uclass) {
                 }
             };
 
-            if (ImGui::Button(_L("Save Property"))) {
+            if (ImGui::Button("Save Property")) {
                 save_logic();
             }
 
-            if (ImGui::Button(_L("Unsave Property"))) {
+            if (ImGui::Button("Unsave Property")) {
                 save_logic(true);
             }
 
@@ -3112,21 +3120,21 @@ void UObjectHook::ui_handle_array_property(void* addr, sdk::FArrayProperty* prop
     const auto& array_generic = *(sdk::TArray<void*>*)((uintptr_t)addr + prop->get_offset());
 
     if (array_generic.data == nullptr || array_generic.count == 0) {
-        ImGui::Text(_L("Empty array"));
+        ImGui::Text("Empty array");
         return;
     }
 
     const auto inner = prop->get_inner();
 
     if (inner == nullptr) {
-        ImGui::Text(_L("Failed to get inner property"));
+        ImGui::Text("Failed to get inner property");
         return;
     }
     
     const auto inner_c = inner->get_class();
 
     if (inner_c == nullptr) {
-        ImGui::Text(_L("Failed to get inner property class"));
+        ImGui::Text("Failed to get inner property class");
         return;
     }
 
@@ -3152,7 +3160,7 @@ void UObjectHook::ui_handle_array_property(void* addr, sdk::FArrayProperty* prop
     }
 
     default:
-        ImGui::Text(_L("Array of %s (unsupported)"), inner_c_type.data());
+        ImGui::Text("Array of %s (unsupported)", inner_c_type.data());
         break;
     };
 }
@@ -3168,7 +3176,7 @@ void UObjectHook::ui_handle_struct(void* addr, sdk::UStruct* uclass) {
     }
 
     // Display inheritance tree
-    if (ImGui::TreeNode(_L("Inheritance"))) {
+    if (ImGui::TreeNode("Inheritance")) {
         for (auto super = (sdk::UStruct*)uclass; super != nullptr; super = super->get_super_struct()) {
             if (ImGui::TreeNode(utility::narrow(super->get_full_name()).data())) {
                 ui_handle_struct(addr, super);
@@ -3179,13 +3187,13 @@ void UObjectHook::ui_handle_struct(void* addr, sdk::UStruct* uclass) {
         ImGui::TreePop();
     }
 
-    if (ImGui::TreeNode(_L("Functions"))) {
+    if (ImGui::TreeNode("Functions")) {
         ui_handle_functions(addr, uclass);
         ImGui::TreePop();
     }
 
     ImGui::SetNextItemOpen(true, ImGuiCond_::ImGuiCond_Once);
-    if (ImGui::TreeNode(_L("Properties"))) {
+    if (ImGui::TreeNode("Properties")) {
         ui_handle_properties(addr, uclass);
         ImGui::TreePop();
     }

@@ -23,6 +23,7 @@ void FrameworkConfig::draw_main() {
 
 void FrameworkConfig::draw_themes() {
     get_imgui_theme()->draw("Select GUI Theme");
+    get_imgui_language()->draw("Select GUI Language");
 
     if (m_font_size->draw("Font Size")) {
         g_framework->set_font_size(m_font_size->value());

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Mod.hpp"
+#include "UILocalized.hpp"
 
 class FrameworkConfig : public Mod {
 public:
@@ -71,6 +72,14 @@ public:
         return m_imgui_theme;
     }
 
+    auto& get_imgui_language() { 
+        return m_imgui_language;
+    }
+
+    auto& get_imgui_language_value() { 
+        return m_imgui_language->value();
+    }
+
     int32_t get_font_size() {
         return m_font_size->value();
     }
@@ -82,6 +91,8 @@ private:
         "Default Light",
         "High Contrast",
     };
+
+
     
     ModKey::Ptr m_menu_key{ ModKey::create(generate_name("MenuKey"), VK_INSERT) };
     ModToggle::Ptr m_menu_open{ ModToggle::create(generate_name("MenuOpen"), true) };
@@ -91,6 +102,7 @@ private:
     ModToggle::Ptr m_always_show_cursor{ ModToggle::create(generate_name("AlwaysShowCursor"), false) };
     ModToggle::Ptr m_advanced_mode{ ModToggle::create(generate_name("AdvancedMode"), false) };
     ModCombo::Ptr m_imgui_theme{ ModCombo::create(generate_name("ImGuiTheme"), s_imgui_themes, Framework::ImGuiThemes::DEFAULT_DARK) };
+    ModCombo::Ptr m_imgui_language{ ModCombo::create(generate_name("ImGuiLanguage"), UILocalized::s_ui_language, UILocalized::UILanguage::ZH_CN)};
     ModKey::Ptr m_show_cursor_key{ ModKey::create(generate_name("ShowCursorKey")) };
     ModInt32::Ptr m_font_size{ModInt32::create(generate_name("FontSize"), 16)};
 
@@ -105,5 +117,6 @@ private:
         *m_imgui_theme,
         *m_always_show_cursor,
         *m_font_size,
+        *m_imgui_language,
     };
 };
