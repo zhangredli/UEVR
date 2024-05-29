@@ -54,6 +54,18 @@ public:
         GESTURE_HEAD_RIGHT,
     };
 
+    enum HORIZONTAL_PROJECTION_OVERRIDE : int32_t {
+        HORIZONTAL_DEFAULT,
+        HORIZONTAL_SYMMETRIC,
+        HORIZONTAL_MIRROR
+    };
+
+    enum VERTICAL_PROJECTION_OVERRIDE : int32_t {
+        VERTICAL_DEFAULT,
+        VERTICAL_SYMMETRIC,
+        VERTICAL_MATCHED
+    };
+
     static const inline std::string s_action_pose = "/actions/default/in/Pose";
     static const inline std::string s_action_grip_pose = "/actions/default/in/GripPose";
     static const inline std::string s_action_trigger = "/actions/default/in/Trigger";
@@ -101,6 +113,11 @@ public:
             {"Debug", true},
         };
     }
+
+    // texture bounds to tell OpenVR which parts of the submitted texture to render (default - use the whole texture).
+    // Will be modified to accommodate forced symmetrical eye projection
+    vr::VRTextureBounds_t m_right_bounds{0.0f, 0.0f, 1.0f, 1.0f};
+    vr::VRTextureBounds_t m_left_bounds{0.0f, 0.0f, 1.0f, 1.0f};
 
     void on_config_load(const utility::Config& cfg, bool set_defaults) override;
     void on_config_save(utility::Config& cfg) override;
@@ -223,6 +240,7 @@ public:
     glm::quat get_rotation_offset();
     void set_rotation_offset(const glm::quat& offset);
     void recenter_view();
+    void recenter_horizon();
 
 
     template<typename T = VRRuntime>
@@ -280,12 +298,12 @@ public:
     }
 
     bool is_using_controllers() const {
-        return m_controller_test_mode || (m_controllers_allowed &&
+        return m_controller_test_mode || (m_controllers_allowed->value() &&
         is_hmd_active() && !m_controllers.empty() && (std::chrono::steady_clock::now() - m_last_controller_update) <= std::chrono::seconds((int32_t)m_motion_controls_inactivity_timer->value()));
     }
 
     bool is_using_controllers_within(std::chrono::seconds seconds) const {
-        return is_hmd_active() && !m_controllers.empty() && (std::chrono::steady_clock::now() - m_last_controller_update) <= seconds;
+        return m_controllers_allowed->value() && is_hmd_active() && !m_controllers.empty() && (std::chrono::steady_clock::now() - m_last_controller_update) <= seconds;
     }
 
     int get_hmd_index() const {
@@ -396,7 +414,7 @@ public:
         return m_lowest_xinput_user_index;
     }
 
-    auto& get_render_target_pool_hook() {
+    auto& get_render_target_pool_hook() const {
         return m_render_target_pool_hook;
     }
 
@@ -432,12 +450,24 @@ public:
         m_aim_temp_disabled = !value;
     }
 
+    bool is_aim_allowed() const {
+        return !m_aim_temp_disabled;
+    }
+
     AimMethod get_aim_method() const {
         if (m_aim_temp_disabled) {
             return AimMethod::GAME;
         }
 
         return (AimMethod)m_aim_method->value();
+    }
+
+    void set_aim_method(AimMethod method) {
+        if ((size_t)method >= s_aim_method_names.size()) {
+            method = AimMethod::GAME;
+        }
+
+        m_aim_method->value() = method;
     }
 
     AimMethod get_movement_orientation() const {
@@ -498,6 +528,10 @@ public:
         return m_sceneview_compatibility_mode->value();
     }
 
+    bool is_ahud_compatibility_enabled() const {
+        return m_compatibility_ahud->value();
+    }
+
     bool is_ghosting_fix_enabled() const {
         return m_ghosting_fix->value();
     }
@@ -544,6 +578,10 @@ public:
         return m_snapturn_angle->value();
     }
 
+    float get_controller_pitch_offset() const {
+        return m_controller_pitch_offset->value();
+    }
+
     bool should_skip_post_init_properties() const {
         return m_compatibility_skip_pip->value();
     }
@@ -554,6 +592,30 @@ public:
 
     bool is_extreme_compatibility_mode_enabled() const {
         return m_extreme_compat_mode->value();
+    }
+
+    auto get_horizontal_projection_override() const {
+        return m_horizontal_projection_override->value();
+    }
+
+    auto get_vertical_projection_override() const {
+        return m_vertical_projection_override->value();
+    }
+
+    bool should_grow_rectangle_for_projection_cropping() const {
+        return m_grow_rectangle_for_projection_cropping->value();
+    }
+
+    vrmod::D3D11Component& d3d11() {
+        return m_d3d11;
+    }
+
+    vrmod::D3D12Component& d3d12() {
+        return m_d3d12;
+    }
+
+    uint32_t get_present_thread_id() const {
+        return m_present_thread_id;
     }
 
 private:
@@ -637,9 +699,6 @@ private:
 
     std::vector<int32_t> m_controllers{};
     std::unordered_set<int32_t> m_controllers_set{};
-
-    vr::VRTextureBounds_t m_right_bounds{ 0.0f, 0.0f, 1.0f, 1.0f };
-    vr::VRTextureBounds_t m_left_bounds{ 0.0f, 0.0f, 1.0f, 1.0f };
 
     glm::vec3 m_overlay_rotation{-1.550f, 0.0f, -1.330f};
     glm::vec4 m_overlay_position{0.0f, 0.06f, -0.07f, 1.0f};
@@ -764,6 +823,18 @@ private:
         "Gesture (Head) + Right Joystick",
     };
 
+    static const inline std::vector<std::string> s_horizontal_projection_override_names{
+        "Raw / default",
+        "Symmetrical",
+        "Mirrored",
+    };
+
+    static const inline std::vector<std::string> s_vertical_projection_override_names{
+        "Raw / default",
+        "Symmetrical",
+        "Matched",
+    };
+
     const ModCombo::Ptr m_rendering_method{ ModCombo::create(generate_name("RenderingMethod"), s_rendering_method_names) };
     const ModCombo::Ptr m_synced_afr_method{ ModCombo::create(generate_name("SyncedSequentialMethod"), s_synced_afr_method_names, 1) };
     const ModToggle::Ptr m_extreme_compat_mode{ ModToggle::create(generate_name("ExtremeCompatibilityMode"), false, true) };
@@ -774,15 +845,19 @@ private:
     const ModToggle::Ptr m_disable_instance_culling{ ModToggle::create(generate_name("DisableInstanceCulling"), true, true) };
     const ModToggle::Ptr m_desktop_fix{ ModToggle::create(generate_name("DesktopRecordingFix_V2"), true) };
     const ModToggle::Ptr m_enable_gui{ ModToggle::create(generate_name("EnableGUI"), true) };
-    const ModToggle::Ptr m_enable_depth{ ModToggle::create(generate_name("EnableDepth"), false) };
+    const ModToggle::Ptr m_enable_depth{ ModToggle::create(generate_name("PassDepthToRuntime"), false, true) };
     const ModToggle::Ptr m_decoupled_pitch{ ModToggle::create(generate_name("DecoupledPitch"), false) };
     const ModToggle::Ptr m_decoupled_pitch_ui_adjust{ ModToggle::create(generate_name("DecoupledPitchUIAdjust"), true) };
     const ModToggle::Ptr m_load_blueprint_code{ ModToggle::create(generate_name("LoadBlueprintCode"), false, true) };
     const ModToggle::Ptr m_2d_screen_mode{ ModToggle::create(generate_name("2DScreenMode"), false) };
     const ModToggle::Ptr m_roomscale_movement{ ModToggle::create(generate_name("RoomscaleMovement"), false) };
     const ModToggle::Ptr m_swap_controllers{ ModToggle::create(generate_name("SwapControllerInputs"), false) };
+    const ModCombo::Ptr m_horizontal_projection_override{ModCombo::create(generate_name("HorizontalProjectionOverride"), s_horizontal_projection_override_names)};
+    const ModCombo::Ptr m_vertical_projection_override{ModCombo::create(generate_name("VerticalProjectionOverride"), s_vertical_projection_override_names)};
+    const ModToggle::Ptr m_grow_rectangle_for_projection_cropping{ModToggle::create(generate_name("GrowRectangleForProjectionCropping"), false)};
 
     // Snap turn settings and globals
+    void gamepad_snapturn(XINPUT_STATE& state);
     void process_snapturn();
     
     const ModToggle::Ptr m_snapturn{ ModToggle::create(generate_name("SnapTurn"), false) };
@@ -791,6 +866,8 @@ private:
     bool m_snapturn_on_frame{false};
     bool m_snapturn_left{false};
     bool m_was_snapturn_run_on_input{false};
+
+    const ModSlider::Ptr m_controller_pitch_offset{ ModSlider::create(generate_name("ControllerPitchOffset"), -90.0f, 90.0f, 0.0f) };
 
     // Aim method and movement orientation are not the same thing, but they can both have the same options
     const ModCombo::Ptr m_aim_method{ ModCombo::create(generate_name("AimMethod"), s_aim_method_names, AimMethod::GAME) };
@@ -840,8 +917,11 @@ private:
     const ModToggle::Ptr m_compatibility_skip_pip{ ModToggle::create(generate_name("Compatibility_SkipPostInitProperties"), false, true) };
     const ModToggle::Ptr m_compatibility_skip_uobjectarray_init{ ModToggle::create(generate_name("Compatibility_SkipUObjectArrayInit"), false, true) };
 
+    const ModToggle::Ptr m_compatibility_ahud{ ModToggle::create(generate_name("Compatibility_AHUD"), false, true) };
+
     // Keybinds
     const ModKey::Ptr m_keybind_recenter{ ModKey::create(generate_name("RecenterViewKey")) };
+    const ModKey::Ptr m_keybind_recenter_horizon{ ModKey::create(generate_name("RecenterHorizonKey")) };
     const ModKey::Ptr m_keybind_set_standing_origin{ ModKey::create(generate_name("ResetStandingOriginKey")) };
 
     const ModKey::Ptr m_keybind_load_camera_0{ ModKey::create(generate_name("LoadCamera0Key")) };
@@ -885,8 +965,16 @@ private:
 
     bool m_stereo_emulation_mode{false}; // not a good config option, just for debugging
     bool m_wait_for_present{true};
-    bool m_controllers_allowed{true};
+    const ModToggle::Ptr m_controllers_allowed{ ModToggle::create(generate_name("ControllersAllowed"), true) };
     bool m_controller_test_mode{false};
+    
+    const ModToggle::Ptr m_show_fps{ ModToggle::create(generate_name("ShowFPSOverlay"), false) };
+    bool m_show_fps_state{false};
+
+    const ModToggle::Ptr m_show_statistics{ ModToggle::create(generate_name("ShowStatsOverlay"), false) };
+    bool m_show_statistics_state{false};
+
+    void update_statistics_overlay(sdk::UGameEngine* engine);
 
     ValueList m_options{
         *m_rendering_method,
@@ -905,9 +993,13 @@ private:
         *m_2d_screen_mode,
         *m_roomscale_movement,
         *m_swap_controllers,
+        *m_horizontal_projection_override,
+        *m_vertical_projection_override,
+        *m_grow_rectangle_for_projection_cropping,
         *m_snapturn,
         *m_snapturn_joystick_deadzone,
         *m_snapturn_angle,
+        *m_controller_pitch_offset,
         *m_aim_method,
         *m_movement_orientation,
         *m_aim_use_pawn_control_rotation,
@@ -931,8 +1023,10 @@ private:
         *m_splitscreen_view_index,
         *m_compatibility_skip_pip,
         *m_compatibility_skip_uobjectarray_init,
+        *m_compatibility_ahud,
         *m_sceneview_compatibility_mode,
         *m_keybind_recenter,
+        *m_keybind_recenter_horizon,
         *m_keybind_set_standing_origin,
         *m_keybind_load_camera_0,
         *m_keybind_load_camera_1,
@@ -941,6 +1035,9 @@ private:
         *m_keybind_disable_vr,
         *m_keybind_toggle_gui,
         *m_requested_runtime_name,
+        *m_show_fps,
+        *m_show_statistics,
+        *m_controllers_allowed,
     };
     
 
@@ -977,6 +1074,8 @@ private:
     bool m_disable_projection_matrix_override{ false };
     bool m_disable_view_matrix_override{false};
     bool m_disable_backbuffer_size_override{false};
+
+    uint32_t m_present_thread_id{};
 
     struct XInputContext {
         struct PadContext {

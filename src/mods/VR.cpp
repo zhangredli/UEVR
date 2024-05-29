@@ -325,7 +325,7 @@ std::optional<std::string> VR::initialize_openxr() {
         // Append the current executable name to the application base name
         {
             const auto exe = utility::get_executable();
-            const auto full_path = utility::get_module_path(exe);
+            const auto full_path = utility::get_module_pathw(exe);
 
             if (full_path) {
                 const auto fs_path = std::filesystem::path(*full_path);
@@ -697,6 +697,7 @@ void VR::on_xinput_get_state(uint32_t* retval, uint32_t user_index, XINPUT_STATE
     if (*retval == ERROR_SUCCESS) {
         // Once here for normal gamepads, and once for the spoofed gamepad at the end
         update_imgui_state_from_xinput_state(*state, false);
+        gamepad_snapturn(*state);
     }
 
     const auto now = std::chrono::steady_clock::now();
@@ -1377,6 +1378,8 @@ void VR::on_pre_engine_tick(sdk::UGameEngine* engine, float delta) {
 
     m_render_target_pool_hook->on_pre_engine_tick(engine, delta);
 
+    update_statistics_overlay(engine);
+
     // Dont update action states on AFR frames
     // TODO: fix this for actual AFR, but we dont really care about pure AFR since synced beats it most of the time
     if (m_fake_stereo_hook != nullptr && !m_fake_stereo_hook->is_ignoring_next_viewport_draw()) {
@@ -1863,6 +1866,10 @@ void VR::handle_keybinds() {
         recenter_view();
     }
 
+    if (m_keybind_recenter_horizon->is_key_down_once()) {
+        recenter_horizon();
+    }
+
     if (m_keybind_load_camera_0->is_key_down_once()) {
         load_camera(0);
     }
@@ -1987,6 +1994,8 @@ void VR::on_frame() {
 
 void VR::on_present() {
     ZoneScopedN(__FUNCTION__);
+
+    m_present_thread_id = GetCurrentThreadId();
 
     utility::ScopeGuard _guard {[&]() {
         if (!is_using_afr() || (m_render_frame_count + 1) % 2 == m_left_eye_interval) {
@@ -2312,6 +2321,12 @@ void VR::on_draw_sidebar_entry(std::string_view name) {
             ImGui::TextWrapped("Note: This is only necessary if you are experiencing performance issues.");
         }
 
+        if (GetModuleHandleW(L"nvngx_dlssg.dll") != nullptr) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
+            ImGui::TextWrapped("WARNING: DLSS Frame Generation has been detected. Make sure it is disabled within in-game settings.");
+            ImGui::PopStyleColor();
+        }
+
         ImGui::Text((std::string{"Runtime Information ("} + get_runtime()->name().data() + ")").c_str());
 
         m_desktop_fix->draw("Desktop Spectator View");
@@ -2345,7 +2360,7 @@ void VR::on_draw_sidebar_entry(std::string_view name) {
         m_disable_blur_widgets->draw("Disable Blur Widgets");
         m_uncap_framerate->draw("Uncap Framerate");
         m_enable_gui->draw("Enable GUI");
-        m_enable_depth->draw("Enable Depth");
+        m_enable_depth->draw("Enable Depth-based Latency Reduction");
         m_load_blueprint_code->draw("Load Blueprint Code");
         m_ghosting_fix->draw("Ghosting Fix");
 
@@ -2369,6 +2384,8 @@ void VR::on_draw_sidebar_entry(std::string_view name) {
         ImGui::SetNextItemOpen(true, ImGuiCond_::ImGuiCond_Once);
         if (ImGui::TreeNode("Controller")) {
             m_joystick_deadzone->draw("VR Joystick Deadzone");
+            m_controller_pitch_offset->draw("Controller Pitch Offset");
+
             m_dpad_shifting->draw("DPad Shifting");
             ImGui::SameLine();
             m_swap_controllers->draw("Left-handed Controller Inputs");
@@ -2399,9 +2416,7 @@ void VR::on_draw_sidebar_entry(std::string_view name) {
         ImGui::SetNextItemOpen(true, ImGuiCond_::ImGuiCond_Once);
         if (ImGui::TreeNode("Snap Turn")) {
             m_snapturn->draw("Enabled");
-            ImGui::TextWrapped("Set Snap Turn Rotation Angle in Degrees.");
             m_snapturn_angle->draw("Angle");
-            ImGui::TextWrapped("Set Snap Turn Joystick Deadzone.");
             m_snapturn_joystick_deadzone->draw("Deadzone");
         
             ImGui::TreePop();
@@ -2481,6 +2496,7 @@ void VR::on_draw_sidebar_entry(std::string_view name) {
         ImGui::SetNextItemOpen(true, ImGuiCond_::ImGuiCond_Once);
         if (ImGui::TreeNode("Playspace Keys")) {
             m_keybind_recenter->draw("Recenter View Key");
+            m_keybind_recenter_horizon->draw("Recenter Horizon Key");
             m_keybind_set_standing_origin->draw("Set Standing Origin Key");
 
             ImGui::TreePop();
@@ -2512,10 +2528,20 @@ void VR::on_draw_sidebar_entry(std::string_view name) {
     if (selected_page == PAGE_COMPATIBILITY) {
         ImGui::SetNextItemOpen(true, ImGuiCond_::ImGuiCond_Once);
         if (ImGui::TreeNode("Compatibility Options")) {
+            m_compatibility_ahud->draw("AHUD UI Compatibility");
             m_compatibility_skip_uobjectarray_init->draw("Skip UObjectArray Init");
             m_compatibility_skip_pip->draw("Skip PostInitProperties");
             m_sceneview_compatibility_mode->draw("SceneView Compatibility Mode");
             m_extreme_compat_mode->draw("Extreme Compatibility Mode");
+
+            // changes to any of these options should trigger a regeneration of the eye projection matrices
+            const auto horizontal_projection_changed = m_horizontal_projection_override->draw("Horizontal Projection");
+            const auto vertical_projection_changed = m_vertical_projection_override->draw("Vertical Projection");
+            const auto scale_render = m_grow_rectangle_for_projection_cropping->draw("Scale Render Target");
+            const auto scale_render_changed = get_runtime()->is_modifying_eye_texture_scale != scale_render;
+            get_runtime()->is_modifying_eye_texture_scale = scale_render;
+            get_runtime()->should_recalculate_eye_projections = horizontal_projection_changed || vertical_projection_changed || scale_render_changed;
+
             ImGui::TreePop();
         }
 
@@ -2542,8 +2568,10 @@ void VR::on_draw_sidebar_entry(std::string_view name) {
         ImGui::Checkbox("Disable VR Entirely", &m_disable_vr);
         ImGui::Checkbox("Stereo Emulation Mode", &m_stereo_emulation_mode);
         ImGui::Checkbox("Wait for Present", &m_wait_for_present);
-        ImGui::Checkbox("Controllers allowed", &m_controllers_allowed);
+        m_controllers_allowed->draw("Controllers allowed");
         ImGui::Checkbox("Controller test mode", &m_controller_test_mode);
+        m_show_fps->draw("Show FPS");
+        m_show_statistics->draw("Show Engine Statistics");
 
         const double min_ = 0.0;
         const double max_ = 25.0;
@@ -2638,6 +2666,10 @@ void VR::on_draw_ui() {
     }
 
     ImGui::SameLine();
+
+    if (ImGui::Button("Recenter Horizon")) {
+        recenter_horizon();
+    }
 
     if (ImGui::Button("Reinitialize Runtime")) {
         get_runtime()->wants_reinitialize = true;
@@ -3119,6 +3151,41 @@ void VR::recenter_view() {
     set_rotation_offset(new_rotation_offset);
 }
 
+void VR::recenter_horizon() {
+    ZoneScopedN(__FUNCTION__);
+
+    const auto new_rotation_offset = glm::normalize(glm::inverse(glm::quat{get_rotation(0)}));
+
+    set_rotation_offset(new_rotation_offset);
+}
+
+void VR::gamepad_snapturn(XINPUT_STATE& state) {
+    if (!m_snapturn->value()) {
+        return;
+    }
+
+    if (!is_hmd_active()) {
+        return;
+    }
+
+    const auto stick_axis = (float)state.Gamepad.sThumbRX / (float)std::numeric_limits<SHORT>::max();
+
+    if (!m_was_snapturn_run_on_input) {
+        if (glm::abs(stick_axis) > m_snapturn_joystick_deadzone->value()) {
+            m_snapturn_left = stick_axis < 0.0f;
+            m_snapturn_on_frame = true;
+            m_was_snapturn_run_on_input = true;
+            state.Gamepad.sThumbRX = 0;
+        }
+    } else {
+        if (glm::abs(stick_axis) < m_snapturn_joystick_deadzone->value()) {
+            m_was_snapturn_run_on_input = false;
+        } else {
+            state.Gamepad.sThumbRX = 0;
+        }
+    }
+}
+
 void VR::process_snapturn() {
     if (!m_snapturn_on_frame) {
         return;
@@ -3150,4 +3217,20 @@ void VR::process_snapturn() {
     }
         
     m_snapturn_on_frame = false;
+}
+
+void VR::update_statistics_overlay(sdk::UGameEngine* engine) {
+    if (engine == nullptr) {
+        return;
+    }
+    
+    if (m_show_fps_state != m_show_fps->value()) {
+        engine->exec(L"stat fps");
+        m_show_fps_state = m_show_fps->value();
+    }
+    
+    if (m_show_statistics_state != m_show_statistics->value()) {
+        engine->exec(L"stat unit");
+        m_show_statistics_state = m_show_statistics->value();
+    }
 }

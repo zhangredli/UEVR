@@ -74,6 +74,7 @@ public:
         return m_imgui_theme;
     }
 
+<<<<<<< HEAD
     auto& get_imgui_language() { 
         return m_imgui_language;
     }
@@ -82,7 +83,10 @@ public:
         return m_imgui_language->value();
     }
 
+    int32_t get_font_size() {
+=======
     int32_t get_font_size() const {
+>>>>>>> praydog-1.04
         return m_font_size->value();
     }
 
@@ -98,6 +102,9 @@ private:
         "High Contrast",
     };
 
+<<<<<<< HEAD
+
+=======
     static inline std::vector<std::string> s_get_log_levels() {
         std::vector<std::string> log_levels{};
         for (auto& level : SPDLOG_LEVEL_NAMES) {
@@ -106,6 +113,7 @@ private:
 
         return log_levels;
     };
+>>>>>>> praydog-1.04
     
     ModKey::Ptr m_menu_key{ ModKey::create(generate_name("MenuKey"), VK_INSERT) };
     ModToggle::Ptr m_menu_open{ ModToggle::create(generate_name("MenuOpen"), true) };
@@ -116,9 +124,12 @@ private:
     ModToggle::Ptr m_advanced_mode{ ModToggle::create(generate_name("AdvancedMode"), false) };
     
     ModCombo::Ptr m_imgui_theme{ ModCombo::create(generate_name("ImGuiTheme"), s_imgui_themes, Framework::ImGuiThemes::DEFAULT_DARK) };
+<<<<<<< HEAD
     ModCombo::Ptr m_imgui_language{ ModCombo::create(generate_name("ImGuiLanguage"), UILocalized::s_ui_language, UILocalized::UILanguage::ZH_CN)};
+=======
     ModCombo::Ptr m_log_level{ ModCombo::create(generate_name("LogLevel"), s_get_log_levels(), spdlog::level::info) };
     
+>>>>>>> praydog-1.04
     ModKey::Ptr m_show_cursor_key{ ModKey::create(generate_name("ShowCursorKey")) };
     ModInt32::Ptr m_font_size{ModInt32::create(generate_name("FontSize"), 16)};
 

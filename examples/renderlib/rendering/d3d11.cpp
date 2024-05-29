@@ -29,21 +29,10 @@ bool D3D11::initialize() {
 
     backbuffer_desc.BindFlags |= D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
 
-    // Create our blank render target.
-    if (FAILED(device->CreateTexture2D(&backbuffer_desc, nullptr, &this->blank_rt))) {
-        return false;
-    }
-
     // Create our render target.
     if (FAILED(device->CreateTexture2D(&backbuffer_desc, nullptr, &this->rt))) {
         return false;
     }
-
-    // Create our blank render target view.
-    if (FAILED(device->CreateRenderTargetView(this->blank_rt.Get(), nullptr, &this->blank_rt_rtv))) {
-        return false;
-    }
-
 
     // Create our render target view.
     if (FAILED(device->CreateRenderTargetView(this->rt.Get(), nullptr, &this->rt_rtv))) {
@@ -70,19 +59,37 @@ bool D3D11::initialize() {
 }
 
 void D3D11::render_imgui() {
+    auto draw_data = ImGui::GetDrawData();
+
+    if (draw_data == nullptr) {
+        return;
+    }
+
     ComPtr<ID3D11DeviceContext> context{};
     float clear_color[]{0.0f, 0.0f, 0.0f, 0.0f};
 
     const auto renderer_data = uevr::API::get()->param()->renderer;
     auto device = (ID3D11Device*)renderer_data->device;
     device->GetImmediateContext(&context);
-    context->ClearRenderTargetView(this->blank_rt_rtv.Get(), clear_color);
     context->ClearRenderTargetView(this->rt_rtv.Get(), clear_color);
     context->OMSetRenderTargets(1, this->rt_rtv.GetAddressOf(), NULL);
-    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+    ImGui_ImplDX11_RenderDrawData(draw_data);
 
     // Set the back buffer to be the render target.
     context->OMSetRenderTargets(1, this->bb_rtv.GetAddressOf(), nullptr);
-    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+    ImGui_ImplDX11_RenderDrawData(draw_data);
 }
 
+void D3D11::render_imgui_vr(ID3D11DeviceContext* context, ID3D11RenderTargetView* rtv) {
+    if (context == nullptr || rtv == nullptr) {
+        return;
+    }
+
+    auto draw_data = ImGui::GetDrawData();
+    if (draw_data == nullptr) {
+        return;
+    }
+
+    context->OMSetRenderTargets(1, &rtv, NULL);
+    ImGui_ImplDX11_RenderDrawData(draw_data);
+}
